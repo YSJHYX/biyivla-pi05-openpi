@@ -18,6 +18,7 @@ import openpi.models.pi0_config as pi0_config
 import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
+import openpi.policies.biyivla_policy as biyivla_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
@@ -65,6 +66,10 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # A pinned local LeRobot snapshot; avoids Hub access during smoke.
+    local_root: str | None = None
+    # Full-snapshot logical subset preserving original episode IDs.
+    episode_indices: Sequence[int] | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -222,6 +227,34 @@ class SimpleDataConfig(DataConfigFactory):
             self.create_base_config(assets_dirs, model_config),
             data_transforms=self.data_transforms(model_config),
             model_transforms=self.model_transforms(model_config),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBiyiVLADataConfig(DataConfigFactory):
+    """Map LeRobot BiyiVLA physical data to the stock pi0.5 model contract."""
+
+    # Each TrainConfig selects its dataset explicitly: integration or production.
+    base_config: tyro.conf.Suppress[DataConfig | None] = dataclasses.field(
+        default_factory=lambda: DataConfig(prompt_from_task=True)
+    )
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if model_config.model_type != ModelType.PI05 or model_config.action_dim != 32:
+            raise ValueError("BiyiVLA requires stock pi0.5 with internal action_dim=32")
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(inputs=[_transforms.RepackTransform({
+                "images": {"head": "observation.images.head", "wrist": "observation.images.wrist"},
+                "state": "observation.state", "actions": "action", "prompt": "prompt",
+            })]),
+            data_transforms=_transforms.Group(
+                inputs=[biyivla_policy.BiyiVLAInputs()],
+                outputs=[biyivla_policy.BiyiVLAOutputs()],
+            ),
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=("action",),
         )
 
 
@@ -794,6 +827,33 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=20_000,
+    ),
+    TrainConfig(
+        name="pi05_biyivla_smoke",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotBiyiVLADataConfig(repo_id="PPPPPilot/VLADexData", base_config=DataConfig(
+            local_root="/data/projects/biyivla_pi05/task3b_dataset",
+            episode_indices=(9,),
+            prompt_from_task=True,
+        )),
+        pytorch_weight_path="/data/openpi_checkpoints/pi05_base_pytorch",
+        assets_base_dir="/data/projects/biyivla_pi05/task3b_artifacts/assets",
+        checkpoint_base_dir="/data/projects/biyivla_pi05/task3b_artifacts/checkpoints",
+        exp_name="episode9_smoke",
+        batch_size=1,
+        num_workers=0,
+        num_train_steps=1,
+        save_interval=1,
+        wandb_enabled=False,
+        ema_decay=None,
+    ),
+    TrainConfig(
+        name="pi05_biyivla_full_ft",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotBiyiVLADataConfig(repo_id="PPPPPilot/BiyiVLA"),
+        pytorch_weight_path="/data/openpi_checkpoints/pi05_base_pytorch",
+        # Batch size, optimizer, schedule, steps, save interval and distributed settings
+        # retain stock TrainConfig defaults until cloud sizing and formal training review.
     ),
     TrainConfig(
         name="pi05_aloha_pen_uncap",

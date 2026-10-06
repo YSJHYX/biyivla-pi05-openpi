@@ -137,9 +137,10 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=data_config.local_root)
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
+        root=data_config.local_root,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
@@ -147,6 +148,17 @@ def create_torch_dataset(
 
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
+
+    if data_config.episode_indices is not None:
+        # LeRobot v2.1's episodes=[9] path indexes a compact episode_data_index by
+        # original episode_id and raises IndexError. Keep the full dataset loaded and
+        # select global frame indices without copying data or changing metadata.
+        indices = []
+        for episode in data_config.episode_indices:
+            length = int(dataset_meta.episodes[episode]["length"])
+            offset = sum(int(dataset_meta.episodes[i]["length"]) for i in range(episode))
+            indices.extend(range(offset, offset + length))
+        dataset = torch.utils.data.Subset(dataset, indices)
 
     return dataset
 
