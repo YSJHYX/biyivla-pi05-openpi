@@ -245,10 +245,18 @@ class LeRobotBiyiVLADataConfig(DataConfigFactory):
             raise ValueError("BiyiVLA requires stock pi0.5 with internal action_dim=32")
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
-            repack_transforms=_transforms.Group(inputs=[_transforms.RepackTransform({
-                "images": {"head": "observation.images.head", "wrist": "observation.images.wrist"},
-                "state": "observation.state", "actions": "action", "prompt": "prompt",
-            })]),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {"head": "observation.images.head", "wrist": "observation.images.wrist"},
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
             data_transforms=_transforms.Group(
                 inputs=[biyivla_policy.BiyiVLAInputs()],
                 outputs=[biyivla_policy.BiyiVLAOutputs()],
@@ -831,11 +839,14 @@ _CONFIGS = [
     TrainConfig(
         name="pi05_biyivla_smoke",
         model=pi0_config.Pi0Config(pi05=True),
-        data=LeRobotBiyiVLADataConfig(repo_id="PPPPPilot/VLADexData", base_config=DataConfig(
-            local_root="/data/projects/biyivla_pi05/task3b_dataset",
-            episode_indices=(9,),
-            prompt_from_task=True,
-        )),
+        data=LeRobotBiyiVLADataConfig(
+            repo_id="PPPPPilot/VLADexData",
+            base_config=DataConfig(
+                local_root="/data/projects/biyivla_pi05/task3b_dataset",
+                episode_indices=(9,),
+                prompt_from_task=True,
+            ),
+        ),
         pytorch_weight_path="/data/openpi_checkpoints/pi05_base_pytorch",
         assets_base_dir="/data/projects/biyivla_pi05/task3b_artifacts/assets",
         checkpoint_base_dir="/data/projects/biyivla_pi05/task3b_artifacts/checkpoints",

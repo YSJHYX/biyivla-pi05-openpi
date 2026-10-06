@@ -6,7 +6,6 @@ import numpy as np
 
 from openpi import transforms
 
-
 PHYSICAL_DIM = 17
 
 

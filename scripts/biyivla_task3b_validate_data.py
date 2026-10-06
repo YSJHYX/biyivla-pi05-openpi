@@ -11,7 +11,8 @@ import pyarrow.parquet as pq
 from openpi import transforms
 from openpi.policies.biyivla_policy import BiyiVLAOutputs
 from openpi.training.config import get_config
-from openpi.training.data_loader import create_torch_dataset, transform_dataset
+from openpi.training.data_loader import create_torch_dataset
+from openpi.training.data_loader import transform_dataset
 
 ROOT = Path("/data/projects/biyivla_pi05/task3b_dataset")
 EXPECTED = ("v2.1", "rm65_sg100", 30, 10, 12285, 2)
@@ -23,7 +24,12 @@ def records(name):
 
 def main():
     info = json.loads((ROOT / "meta/info.json").read_text())
-    assert tuple(info[k] for k in ("codebase_version", "robot_type", "fps", "total_episodes", "total_frames", "total_tasks")) == EXPECTED
+    assert (
+        tuple(
+            info[k] for k in ("codebase_version", "robot_type", "fps", "total_episodes", "total_frames", "total_tasks")
+        )
+        == EXPECTED
+    )
     assert info["features"]["observation.state"]["shape"] == [17]
     assert info["features"]["action"]["shape"] == [17]
     episode = {r["episode_index"]: r for r in records("episodes.jsonl")}
@@ -41,24 +47,60 @@ def main():
         chunk = index // info["chunks_size"]
         parquet = ROOT / info["data_path"].format(episode_chunk=chunk, episode_index=index)
         table = pq.read_table(parquet)
-        assert table.num_rows == length and parquet.stat().st_size > 0
+        assert table.num_rows == length
+        assert parquet.stat().st_size > 0
         for key in ("observation.state", "action"):
             value = np.asarray(table[key].to_pylist(), dtype=np.float32)
-            assert value.shape == (length, 17) and np.isfinite(value).all()
+            assert value.shape == (length, 17)
+            assert np.isfinite(value).all()
         for key in ("observation.images.head", "observation.images.wrist"):
             video = ROOT / info["video_path"].format(episode_chunk=chunk, episode_index=index, video_key=key)
             assert video.stat().st_size > 0
-            probe = json.loads(subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "stream=width,height,r_frame_rate,nb_frames:format=duration", "-of", "json", str(video)],
-                capture_output=True, text=True, check=True,
-            ).stdout)
+            probe = json.loads(
+                subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "stream=width,height,r_frame_rate,nb_frames:format=duration",
+                        "-of",
+                        "json",
+                        str(video),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout
+            )
             stream = probe["streams"][0]
-            assert (stream["width"], stream["height"], stream["r_frame_rate"], int(stream["nb_frames"])) == (640, 480, "30/1", length)
+            assert (stream["width"], stream["height"], stream["r_frame_rate"], int(stream["nb_frames"])) == (
+                640,
+                480,
+                "30/1",
+                length,
+            )
             assert abs(float(probe["format"]["duration"]) - length / 30) < 0.2
             for frame in (0, length // 2, length - 1):
                 rgb = subprocess.run(
-                    ["ffmpeg", "-v", "error", "-ss", str(frame / 30), "-i", str(video), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                    capture_output=True, check=True,
+                    [
+                        "ffmpeg",
+                        "-v",
+                        "error",
+                        "-ss",
+                        str(frame / 30),
+                        "-i",
+                        str(video),
+                        "-frames:v",
+                        "1",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        "rgb24",
+                        "-",
+                    ],
+                    capture_output=True,
+                    check=True,
                 ).stdout
                 assert len(rgb) == 640 * 480 * 3
             print("EPISODE_MEDIA PASS", index, key, "frames", length)
@@ -73,12 +115,17 @@ def main():
     for index in (0, len(raw) // 2, len(raw) - 1):
         sample = raw[index]
         out = processed[index]
-        assert int(sample["episode_index"]) == 9 and int(sample["task_index"]) == 1
+        assert int(sample["episode_index"]) == 9
+        assert int(sample["task_index"]) == 1
         assert sample["prompt"] == tasks[1]
-        assert sample["observation.state"].shape == (17,) and sample["action"].shape == (50, 17)
-        assert out["state"].shape == (32,) and out["actions"].shape == (50, 32)
-        assert np.isfinite(out["state"]).all() and np.isfinite(out["actions"]).all()
-        assert not np.any(out["state"][17:]) and not np.any(out["actions"][:, 17:])
+        assert sample["observation.state"].shape == (17,)
+        assert sample["action"].shape == (50, 17)
+        assert out["state"].shape == (32,)
+        assert out["actions"].shape == (50, 32)
+        assert np.isfinite(out["state"]).all()
+        assert np.isfinite(out["actions"]).all()
+        assert not np.any(out["state"][17:])
+        assert not np.any(out["actions"][:, 17:])
         assert out["image_mask"]["right_wrist_0_rgb"] == np.False_
         print("LOADER PASS", index, "timestamp", float(sample["timestamp"]), "prompt", sample["prompt"])
 
@@ -86,7 +133,9 @@ def main():
     physical = transforms.compose([*data.repack_transforms.inputs, *data.data_transforms.inputs])(sample)
     normalized = transforms.Normalize(data.norm_stats, use_quantiles=data.use_quantile_norm)(physical)
     padded = transforms.PadStatesAndActions(32)(normalized)
-    restored = transforms.Unnormalize(data.norm_stats, use_quantiles=data.use_quantile_norm)({"state": padded["state"], "actions": padded["actions"]})
+    restored = transforms.Unnormalize(data.norm_stats, use_quantiles=data.use_quantile_norm)(
+        {"state": padded["state"], "actions": padded["actions"]}
+    )
     cropped = BiyiVLAOutputs()(restored)["actions"]
     assert cropped.shape == (50, 17)
     np.testing.assert_allclose(cropped, physical["actions"], atol=2e-3, rtol=1e-5)
