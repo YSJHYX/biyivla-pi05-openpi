@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 import difflib
 import logging
+import os
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -264,6 +265,17 @@ class LeRobotBiyiVLADataConfig(DataConfigFactory):
             model_transforms=ModelTransformFactory()(model_config),
             action_sequence_keys=("action",),
         )
+
+
+def _biyi_stage1_episode_indices() -> tuple[int, ...] | None:
+    """Optional frozen train split, expressed as comma-separated original episode IDs."""
+    value = os.environ.get("BIYI_TRAIN_EPISODES", "").strip()
+    if not value:
+        return None
+    indices = tuple(int(part.strip()) for part in value.split(","))
+    if not indices or len(set(indices)) != len(indices) or any(index < 0 for index in indices):
+        raise ValueError("BIYI_TRAIN_EPISODES must contain unique non-negative episode IDs")
+    return indices
 
 
 @dataclasses.dataclass(frozen=True)
@@ -865,6 +877,28 @@ _CONFIGS = [
         pytorch_weight_path="/data/openpi_checkpoints/pi05_base_pytorch",
         # Batch size, optimizer, schedule, steps, save interval and distributed settings
         # retain stock TrainConfig defaults until cloud sizing and formal training review.
+    ),
+    TrainConfig(
+        name="pi05_biyi_stage1",
+        project_name="BiyiVLA-Stage1",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=50),
+        # Set these at launch time. An empty repo ID is rejected by the Stage-1 preflight.
+        data=LeRobotBiyiVLADataConfig(
+            repo_id=os.environ.get("BIYI_DATASET_REPO_ID", ""),
+            base_config=DataConfig(
+                local_root=os.environ.get("BIYI_DATASET_LOCAL_ROOT") or None,
+                episode_indices=_biyi_stage1_episode_indices(),
+                prompt_from_task=True,
+            ),
+        ),
+        pytorch_weight_path=os.environ.get("BIYI_BASE_CHECKPOINT_DIR", "/data/openpi_checkpoints/pi05_base_pytorch"),
+        assets_base_dir=os.environ.get("BIYI_ASSETS_BASE_DIR", "./assets"),
+        checkpoint_base_dir=os.environ.get("BIYI_CHECKPOINT_BASE_DIR", "./checkpoints"),
+        batch_size=32,  # Provisional global batch; size on 2 x H20 before formal training.
+        num_train_steps=5000,  # Decision checkpoint; override after train-frame and memory sizing.
+        save_interval=1000,
+        wandb_enabled=True,
+        ema_decay=None,  # The PyTorch trainer has no EMA implementation.
     ),
     TrainConfig(
         name="pi05_aloha_pen_uncap",

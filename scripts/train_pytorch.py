@@ -615,6 +615,10 @@ def train_loop(config: _config.TrainConfig):
     if pbar is not None:
         pbar.close()
 
+    # Report PyTorch allocator peaks for every DDP rank, including AdamW state
+    # materialized by the first optimizer step.
+    log_memory_usage(device, global_step, "training_complete")
+
     # Finish wandb run
     if is_main and config.wandb_enabled:
         wandb.finish()
