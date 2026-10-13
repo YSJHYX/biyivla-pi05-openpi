@@ -26,10 +26,32 @@ if [[ "$profile" == "compute-stats" ]]; then
   "$python_bin" -m scripts.biyi.compute_stage1_norm_stats
   exit
 fi
+
+peak_lr=2.5e-5
+end_lr=2.5e-6
+
+set_formal_schedule() {
+  if [[ ! "$num_steps" =~ ^[1-9][0-9]*$ ]] || (( num_steps < 10 )); then
+    echo "Formal training requires an integer BIYI_NUM_TRAIN_STEPS >= 10" >&2
+    exit 2
+  fi
+  # Nearest integer for positive steps, with half steps rounded upward.
+  warmup_steps=$(( (num_steps + 5) / 10 ))
+  decay_steps="$num_steps"
+}
+
+run_formal_preflight() {
+  "$python_bin" -m scripts.biyi.preflight_pi05_stage1 \
+    --formal --wandb-enabled --project-name BiyiVLA-Stage1 --exp-name "$BIYI_EXP_NAME" \
+    --num-train-steps "$num_steps" --warmup-steps "$warmup_steps" --decay-steps "$decay_steps" \
+    --peak-lr "$peak_lr" --end-lr "$end_lr"
+}
+
 if [[ "$profile" == "preflight" ]]; then
   : "${BIYI_EXP_NAME:?Set the formal experiment name}"
-  "$python_bin" -m scripts.biyi.preflight_pi05_stage1 \
-    --formal --wandb-enabled --project-name BiyiVLA-Stage1 --exp-name "$BIYI_EXP_NAME"
+  num_steps="${BIYI_NUM_TRAIN_STEPS:-10000}"
+  set_formal_schedule
+  run_formal_preflight
   exit
 fi
 
@@ -74,14 +96,22 @@ case "$profile" in
     ;;
 esac
 
+if [[ "$profile" == "train" ]]; then
+  set_formal_schedule
+else
+  # Short smoke runs exercise optimizer and checkpoint behavior independently
+  # of the formal 10% warmup recipe, including across H20 save/resume.
+  warmup_steps=1
+  decay_steps="$num_steps"
+fi
+
 if (( batch_size < 1 )) || { [[ "$profile" != "local-smoke" ]] && (( batch_size % 2 != 0 )); }; then
   echo "Global batch must be positive and divisible by 2 for DDP" >&2
   exit 2
 fi
 
 if [[ "$profile" == "train" ]]; then
-  "$python_bin" -m scripts.biyi.preflight_pi05_stage1 \
-    --formal --wandb-enabled --project-name BiyiVLA-Stage1 --exp-name "$exp_name"
+  run_formal_preflight
 else
   "$python_bin" -m scripts.biyi.preflight_pi05_stage1 --smoke --no-wandb-enabled
 fi
@@ -105,6 +135,10 @@ args=(
   --batch-size "$batch_size"
   --num-workers "$num_workers"
   --num-train-steps "$num_steps"
+  --lr-schedule.warmup-steps "$warmup_steps"
+  --lr-schedule.decay-steps "$decay_steps"
+  --lr-schedule.peak-lr "$peak_lr"
+  --lr-schedule.decay-lr "$end_lr"
   --save-interval "$save_interval"
   --keep-period "${BIYI_KEEP_PERIOD:-5000}"
   --assets-base-dir "$BIYI_ASSETS_BASE_DIR"
@@ -120,7 +154,7 @@ fi
 
 if [[ "$profile" == "h20-smoke" ]]; then
   first_steps=$((num_steps - 10))
-  args[9]="$first_steps"
+  args[9]="$first_steps" # --num-train-steps value; schedule keeps the full smoke horizon.
   "${launcher[@]}" "${args[@]}"
   args[9]="$num_steps"
   "${launcher[@]}" "${args[@]}" --resume

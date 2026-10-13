@@ -454,13 +454,26 @@ def train_loop(config: _config.TrainConfig):
     decay_steps = config.lr_schedule.decay_steps
     end_lr = config.lr_schedule.decay_lr
 
+    # Keep stock behavior for other configs; Stage-1 decays trainable matrices
+    # and excludes bias and 0D/1D parameters from AdamW weight decay.
+    optimizer_parameters = model.parameters()
+    optimizer_weight_decay = config.optimizer.weight_decay
+    if config.name == "pi05_biyi_stage1":
+        from openpi.training.biyi_optimizer_groups import stage1_adamw_groups
+
+        optimizer_parameters, group_summary = stage1_adamw_groups(model, config.optimizer.weight_decay)
+        if group_summary["frozen_parameter_count"]:
+            raise ValueError("Stage-1 requires every model parameter to be trainable")
+        optimizer_weight_decay = 0.0  # Each Stage-1 group sets its own value.
+        logging.info("Stage-1 AdamW parameter groups: %s", group_summary)
+
     # Create optimizer with config parameters
     optim = torch.optim.AdamW(
-        model.parameters(),
+        optimizer_parameters,
         lr=peak_lr,
         betas=(config.optimizer.b1, config.optimizer.b2),
         eps=config.optimizer.eps,
-        weight_decay=config.optimizer.weight_decay,
+        weight_decay=optimizer_weight_decay,
     )
 
     # Load checkpoint if resuming

@@ -895,8 +895,23 @@ _CONFIGS = [
         assets_base_dir=os.environ.get("BIYI_ASSETS_BASE_DIR", "./assets"),
         checkpoint_base_dir=os.environ.get("BIYI_CHECKPOINT_BASE_DIR", "./checkpoints"),
         batch_size=32,  # Provisional global batch; size on 2 x H20 before formal training.
-        num_train_steps=5000,  # Decision checkpoint; override after train-frame and memory sizing.
+        num_train_steps=10000,  # Provisional endpoint; freeze after dataset and memory sizing.
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1000,
+            peak_lr=2.5e-5,
+            decay_steps=10000,
+            decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(
+            b1=0.9,
+            b2=0.95,
+            eps=1e-8,
+            weight_decay=0.05,
+            clip_gradient_norm=1.0,
+        ),
         save_interval=1000,
+        seed=42,
+        pytorch_training_precision="bfloat16",
         wandb_enabled=True,
         ema_decay=None,  # The PyTorch trainer has no EMA implementation.
     ),

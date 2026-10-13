@@ -4,6 +4,9 @@
 
 `pi05_biyi_stage1` fine-tunes the stock PyTorch π0.5 model: `pi05=True`,
 `action_dim=32`, `action_horizon=50`, BF16, AdamW, and all parameters trainable.
+The Stage-1 experiment seed is 42; a future Stage-2 multi-seed study may use
+42 / 123 / 3407, but it is not part of this launcher. Stage-2 model selection
+must include validation and real-robot metrics, not train loss alone.
 There is no AHFE, auxiliary/dual head, LoRA, residual RL, or delta-action
 transform in this path. RTC is OFF; RTC training/inference belongs to a separate
 stage after Stage-1 model validation and is not implemented here.
@@ -45,10 +48,21 @@ STAGE1_TRAIN_WANDB   = ON
 ```
 
 Formal runs use project `BiyiVLA-Stage1`; `BIYI_EXP_NAME` becomes the run name
-and checkpoint directory name, for example `pi05_biyi_stage1_bs32_5k_v1`.
+and checkpoint directory name, for example `pi05_biyi_stage1_bs32_10k_v1`.
+The provisional formal recipe is 10k optimizer steps, 10% warmup, and cosine
+decay ending at step 10k: peak LR 2.5e-5, end LR 2.5e-6, AdamW
+`(b1=0.9, b2=0.95, eps=1e-8)`, weight decay 0.05, gradient clip 1.0,
+BF16 dominant mixed precision, seed 42, and no EMA. Stage-1 AdamW applies
+weight decay to trainable matrix weights, including embedding matrices and
+AdaRMS conditioning projections. Bias and scalar/1D parameters, including
+normalization scales and AdaRMS projection biases, use zero decay.
+CPU meta-model inspection found 812/812 tensors trainable:
+460 decay tensors (3,616,163,328 scalar parameters) and 352 no-decay tensors
+(594,192 scalar parameters). All 37 AdaRMS `dense.weight` matrices decay.
 Formal preflight checks `BIYI_EXP_NAME`, W&B project/enabled state, online W&B
-authentication, HF authentication, and private dataset access. `auth-check`
-queries the SDKs without starting a W&B run. Only DDP rank 0 initializes and
+authentication, HF authentication, private dataset access, and the effective
+steps/warmup/decay/LR/weight-decay/seed/BF16/EMA recipe before training.
+`auth-check` queries the SDKs without starting a W&B run. Only DDP rank 0 initializes and
 logs W&B. The trainer already logs loss, learning rate, gradient norm, step
 time, and global step; W&B can collect system GPU metrics. The added trainer
 code prints allocated, reserved, and peak PyTorch allocator VRAM per rank at
@@ -111,7 +125,8 @@ export BIYI_ASSETS_BASE_DIR='/path/to/new/stage1/assets'
 export BIYI_CHECKPOINT_BASE_DIR='/path/to/new/stage1/checkpoints'
 export HF_DATASETS_CACHE='/path/to/writable/hf-datasets-cache'
 scripts/biyi/train_pi05_stage1.sh compute-stats
-export BIYI_EXP_NAME='pi05_biyi_stage1_bs32_5k_v1'
+export BIYI_EXP_NAME='pi05_biyi_stage1_bs32_10k_v1'
+export BIYI_NUM_TRAIN_STEPS=10000 # provisional; freeze after dataset sizing
 scripts/biyi/train_pi05_stage1.sh preflight
 ```
 
@@ -149,18 +164,21 @@ forward/backward pass alone does not establish memory fit: the first AdamW
 Formal two GPU launch, only after dataset freeze, preflight, and memory smoke:
 
 ```bash
-export BIYI_EXP_NAME='pi05_biyi_stage1_bs32_5k_v1'
-export BIYI_NUM_TRAIN_STEPS=5000 # decide from train frames and evaluation plan
+export BIYI_EXP_NAME='pi05_biyi_stage1_bs32_10k_v1'
+export BIYI_NUM_TRAIN_STEPS=10000 # provisional; freeze before the first formal step
 BIYI_BATCH_SIZE=32 scripts/biyi/train_pi05_stage1.sh train
-# To extend the same run after reviewing 5k:
-BIYI_NUM_TRAIN_STEPS=10000 BIYI_RESUME=1 scripts/biyi/train_pi05_stage1.sh train
+# To resume an interrupted run with the same frozen schedule:
+BIYI_RESUME=1 BIYI_BATCH_SIZE=32 scripts/biyi/train_pi05_stage1.sh train
 ```
 
 The launcher passes current Tyro options to `scripts/train_pytorch.py`, using
 `torchrun --standalone --nnodes=1 --nproc_per_node=2` on H20. Override
 `BIYI_NUM_WORKERS`, `BIYI_SAVE_INTERVAL`, `BIYI_KEEP_PERIOD`, and
-`BIYI_LOG_INTERVAL` as needed. The stock cosine schedule has 1k warmup and
-30k decay steps; review it against the final step target before the formal run.
+`BIYI_LOG_INTERVAL` as needed. Formal launch computes warmup as
+`(num_train_steps + 5) / 10` using integer division (nearest 10%, halves up)
+and sets `decay_steps=num_train_steps`. The 10k default resolves to 1k/10k;
+15k and 20k resolve to 1.5k/15k and 2k/20k. Smoke instead uses one warmup
+step and a schedule spanning its full short run, including H20 resume.
 `BIYI_BATCH_SIZE` is global batch, split evenly
 across DDP ranks. This trainer has no gradient accumulation; if batch 32 does
 not fit, lower the global batch and recompute the steps/effective epochs.
@@ -174,10 +192,11 @@ uses `resume="must"` for later formal resumes. Smoke runs do not create the ID.
 The default save interval is 1000 for the formal run. PyTorch checkpoints
 include `model.safetensors`, `optimizer.pt`, `metadata.pt`, and norm assets.
 The PyTorch trainer does not implement rotation or `keep_period` retention,
-despite accepting that CLI option. Thus 1k, 3k, 5k, and (if extended) 8k and
-10k remain on disk unless an operator manages storage. The 5k checkpoint is
-the primary evaluation decision point. `--resume` loads the latest numbered
-checkpoint and its optimizer state. No long run is started by preparation.
+despite accepting that CLI option. Planned roles: 1k early optimization check,
+3k early behavior, 5k intermediate real-robot checkpoint, 8k late checkpoint,
+and 10k provisional primary endpoint. These remain on disk unless an operator
+manages storage. `--resume` loads the latest numbered checkpoint and its
+optimizer state. No long run is started by preparation.
 
 ## AutoDL 2×H20 Cloud Bring-up Checklist
 
@@ -409,14 +428,17 @@ mismatch. Do not reuse episode 9, VLADexData smoke, pilot, or 18D stats.
 ### Step 13 — Run formal preflight
 
 ```bash
-export BIYI_EXP_NAME='pi05_biyi_stage1_bs32_5k_v1'
+export BIYI_EXP_NAME='pi05_biyi_stage1_bs32_10k_v1'
+export BIYI_NUM_TRAIN_STEPS=10000
 scripts/biyi/train_pi05_stage1.sh preflight
 ```
 
 Require `DATASET_CONTRACT`, `TRAIN_SPLIT`, `NORM_STATS`, `BASE_CHECKPOINT`,
 `FULL_FINE_TUNING`, `RTC_DISABLED`, `WANDB_ENABLED`, `WANDB_PROJECT`,
-`HF_AUTH`, `HF_DATASET_ACCESS`, and `WANDB_AUTH` to pass. Formal preflight
-requires online credentials; smoke preflight explicitly disables W&B and does
+`HF_AUTH`, `HF_DATASET_ACCESS`, `WANDB_AUTH`, and `TRAINING_RECIPE_GATE` to pass.
+The recipe gate prints `NUM_TRAIN_STEPS`, `WARMUP_STEPS`, `WARMUP_RATIO`,
+`DECAY_STEPS`, `PEAK_LR`, `END_LR`, `WEIGHT_DECAY`, and `SEED` checks.
+Formal preflight requires online credentials; smoke preflight explicitly disables W&B and does
 not check cloud credentials.
 
 ### Step 14 — Run H20 memory smoke at increasing global batches
@@ -446,21 +468,29 @@ headroom. A single forward/backward pass is insufficient.
 
 ### Step 15 — Choose the final training budget
 
-Record train episode count, train frame count, and validated global batch.
-Use `samples_seen = global_batch × training_steps` as one budget measure;
-do not decide steps from episode count alone. Plan checkpoints at 1k, 3k, and
-5k; 5k is the first primary model decision point. Decide on 8k/10k only after
-reviewing real results. Revisit the stock 1k warmup/30k cosine schedule if
-training stops at 5k.
+Record train episode count, train frame count, validated global batch, and
+actual `N_train_samples`. Use
+`samples_seen = global_batch × num_train_steps` and
+`effective_exposure = samples_seen / N_train_samples` before freezing the
+formal budget. At global batch 32, 5k/10k/15k/20k steps represent
+160k/320k/480k/640k samples seen. The provisional primary endpoint is 10k,
+not a hard maximum. If the frozen dataset makes 10k exposure too low, choose
+15k or 20k **before** the first formal step; warmup remains 10% and decay ends
+at the chosen budget. Do not change the schedule horizon during resume.
+
+Checkpoint roles: 1k early optimization check, 3k early behavior, 5k
+intermediate real-robot checkpoint, 8k late checkpoint, and 10k provisional
+primary endpoint. Interpret checkpoints with validation and real-robot metrics,
+not train loss alone.
 
 ### Step 16 — Start formal Stage-1 training
 
 Only after all cloud and smoke gates pass, use a new formal experiment name:
 
 ```bash
-BIYI_EXP_NAME=pi05_biyi_stage1_bs32_5k_v1 \
+BIYI_EXP_NAME=pi05_biyi_stage1_bs32_10k_v1 \
 BIYI_BATCH_SIZE=32 \
-BIYI_NUM_TRAIN_STEPS=5000 \
+BIYI_NUM_TRAIN_STEPS=10000 \
 scripts/biyi/train_pi05_stage1.sh train
 ```
 
@@ -478,11 +508,11 @@ training.
 
 ### Step 17 — Resume the same formal run
 
-Use the original `BIYI_EXP_NAME` and checkpoint base directory, confirm its
-`wandb_id.txt` exists, and set:
+Use the original `BIYI_EXP_NAME`, frozen `BIYI_NUM_TRAIN_STEPS`, and checkpoint
+base directory; confirm `wandb_id.txt` exists. For an interrupted 10k run:
 
 ```bash
-BIYI_EXP_NAME=pi05_biyi_stage1_bs32_5k_v1 \
+BIYI_EXP_NAME=pi05_biyi_stage1_bs32_10k_v1 \
 BIYI_BATCH_SIZE=32 \
 BIYI_NUM_TRAIN_STEPS=10000 \
 BIYI_RESUME=1 \
@@ -492,15 +522,19 @@ scripts/biyi/train_pi05_stage1.sh train
 The stock W&B resume uses the saved run ID with `resume="must"`; training
 loads the latest numbered checkpoint and optimizer state. Never resume a
 formal run from a smoke directory.
+The revised two-group Stage-1 AdamW state is incompatible with an older
+single-group `optimizer.pt` or the previous 423/389 two-group layout. Start
+formal training in a new experiment directory; do not resume either older
+optimizer state. Loading the base `model.safetensors` weights is unaffected.
 
 ### Step 18 — Plan checkpoint storage explicitly
 
 Estimate about 22 GB per complete model/optimizer checkpoint, then measure
 the first H20 save. The PyTorch trainer accepts `keep_period` but does not
-rotate checkpoints. Keep 1k, 3k, and 5k on the 200/400+ GB data disk; if the
-run extends, plan 8k/10k similarly. Only consider archiving/removing
-nondecision checkpoints such as 2k, 4k, or 4999 after verifying a complete,
-readable save and any required remote copy. Do not automate deletion before
+rotate checkpoints. Plan to keep the 1k, 3k, 5k, 8k, and 10k role checkpoints
+on the data disk, subject to measured available space. Only consider
+archiving/removing nondecision checkpoints such as 2k, 4k, or 4999 after
+verifying a complete, readable save and any required remote copy. Do not automate deletion before
 the save/resume smoke. Monitor `du -sh "$BIYI_CHECKPOINT_BASE_DIR"` and
 `df -h "$BIYI_ROOT"` throughout training.
 

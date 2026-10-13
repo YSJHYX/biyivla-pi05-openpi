@@ -4,6 +4,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 
@@ -42,8 +43,11 @@ def fingerprint(root: Path, repo_id: str, selected: tuple[int, ...] | None, epis
     }
 
 
-def validate(*, require_stats: bool) -> tuple[training_config.TrainConfig, dict]:
-    config = training_config.get_config(CONFIG_NAME)
+def validate(
+    *, require_stats: bool, config: training_config.TrainConfig | None = None
+) -> tuple[training_config.TrainConfig, dict]:
+    if config is None:
+        config = training_config.get_config(CONFIG_NAME)
     model = config.model
     if not model.pi05 or model.action_dim != 32 or model.action_horizon != 50:
         raise ValueError("Stage-1 requires stock pi0.5 with 32D actions and horizon 50")
@@ -160,6 +164,55 @@ def validate(*, require_stats: bool) -> tuple[training_config.TrainConfig, dict]
     return config, identity
 
 
+def check_formal_recipe(config: training_config.TrainConfig) -> bool:
+    """Check the effective trainer recipe before cloud auth or dataset reads."""
+    steps = config.num_train_steps
+    schedule = config.lr_schedule
+    optimizer = config.optimizer
+    if type(schedule).__name__ != "CosineDecaySchedule" or type(optimizer).__name__ != "AdamW":
+        print("TRAINING_RECIPE_GATE = FAIL (expected CosineDecaySchedule and AdamW)")
+        return False
+    expected_warmup = (steps + 5) // 10 if steps >= 10 else -1
+    checks = {
+        "MODEL_PI05": (config.model.pi05, config.model.pi05 is True),
+        "ACTION_DIM": (config.model.action_dim, config.model.action_dim == 32),
+        "ACTION_HORIZON": (config.model.action_horizon, config.model.action_horizon == 50),
+        "NUM_TRAIN_STEPS": (steps, steps >= 10),
+        "WARMUP_STEPS": (schedule.warmup_steps, schedule.warmup_steps == expected_warmup),
+        "WARMUP_RATIO": (
+            schedule.warmup_steps / steps if steps > 0 else math.nan,
+            steps > 0 and abs(schedule.warmup_steps / steps - 0.10) <= 0.5 / steps + 1e-12,
+        ),
+        "DECAY_STEPS": (schedule.decay_steps, schedule.decay_steps == steps),
+        "PEAK_LR": (schedule.peak_lr, math.isclose(schedule.peak_lr, 2.5e-5, rel_tol=1e-9)),
+        "END_LR": (schedule.decay_lr, math.isclose(schedule.decay_lr, 2.5e-6, rel_tol=1e-9)),
+        "ADAMW_B1": (optimizer.b1, math.isclose(optimizer.b1, 0.9, rel_tol=1e-9)),
+        "ADAMW_B2": (optimizer.b2, math.isclose(optimizer.b2, 0.95, rel_tol=1e-9)),
+        "ADAMW_EPS": (optimizer.eps, math.isclose(optimizer.eps, 1e-8, rel_tol=1e-9)),
+        "WEIGHT_DECAY": (optimizer.weight_decay, math.isclose(optimizer.weight_decay, 0.05, rel_tol=1e-9)),
+        "GRAD_CLIP": (
+            optimizer.clip_gradient_norm,
+            math.isclose(optimizer.clip_gradient_norm, 1.0, rel_tol=1e-9),
+        ),
+        "SEED": (config.seed, config.seed == 42),
+        "EMA": (config.ema_decay, config.ema_decay is None),
+        "BF16": (
+            config.pytorch_training_precision,
+            config.pytorch_training_precision == "bfloat16" and config.model.dtype == "bfloat16",
+        ),
+        "FULL_FINE_TUNING": (type(config.freeze_filter).__name__, type(config.freeze_filter).__name__ == "Nothing"),
+        "RTC_DISABLED": (
+            "absent",
+            not any("rtc" in field.name.lower() for field in dataclasses.fields(config.model)),
+        ),
+    }
+    for name, (value, passed) in checks.items():
+        print(f"{name:<20}= {'PASS' if passed else 'FAIL'} ({value})")
+    passed = all(result for _, result in checks.values())
+    print(f"TRAINING_RECIPE_GATE = {'PASS' if passed else 'FAIL'}")
+    return passed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-missing-stats", action="store_true", help="Only for dataset/config preparation")
@@ -167,6 +220,11 @@ def main() -> None:
     parser.add_argument("--smoke", action="store_true", help="Check the smoke W&B-disabled contract")
     parser.add_argument("--exp-name")
     parser.add_argument("--project-name")
+    parser.add_argument("--num-train-steps", type=int)
+    parser.add_argument("--warmup-steps", type=int)
+    parser.add_argument("--decay-steps", type=int)
+    parser.add_argument("--peak-lr", type=float)
+    parser.add_argument("--end-lr", type=float)
     wandb_flags = parser.add_mutually_exclusive_group()
     wandb_flags.add_argument("--wandb-enabled", dest="wandb_enabled", action="store_true")
     wandb_flags.add_argument("--no-wandb-enabled", dest="wandb_enabled", action="store_false")
@@ -176,6 +234,24 @@ def main() -> None:
         parser.error("Formal preflight cannot be combined with smoke or missing stats")
     if args.formal:
         config = training_config.get_config(CONFIG_NAME)
+        if any(
+            value is None
+            for value in (args.num_train_steps, args.warmup_steps, args.decay_steps, args.peak_lr, args.end_lr)
+        ):
+            parser.error("Formal preflight requires the effective step and LR schedule values")
+        config = dataclasses.replace(
+            config,
+            num_train_steps=args.num_train_steps,
+            lr_schedule=dataclasses.replace(
+                config.lr_schedule,
+                warmup_steps=args.warmup_steps,
+                decay_steps=args.decay_steps,
+                peak_lr=args.peak_lr,
+                decay_lr=args.end_lr,
+            ),
+        )
+        if not check_formal_recipe(config):
+            raise SystemExit(1)
         exp_name = os.environ.get("BIYI_EXP_NAME", "").strip()
         if not config.wandb_enabled or args.wandb_enabled is not True:
             parser.error("Formal training requires --wandb-enabled")
@@ -192,7 +268,7 @@ def main() -> None:
         parser.error("Smoke preflight requires --no-wandb-enabled")
 
     try:
-        config, identity = validate(require_stats=not args.allow_missing_stats)
+        config, identity = validate(require_stats=not args.allow_missing_stats, config=config if args.formal else None)
     except Exception as exc:
         if args.formal:
             print(f"FORMAL_PREFLIGHT     = FAIL: {exc}")
