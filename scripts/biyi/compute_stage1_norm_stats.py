@@ -32,7 +32,7 @@ def main() -> None:
     normalize.save(
         config.assets_dirs / data.asset_id, {key: running.get_statistics() for key, running in stats.items()}
     )
-    stats_path = config.assets_dirs / config.data.repo_id / "norm_stats.json"
+    stats_path = config.assets_dirs / data.asset_id / "norm_stats.json"
     manifest = {**identity, "norm_stats_sha256": _sha256(stats_path)}
     manifest_path = Path(stats_path.with_name("stage1_train_stats_manifest.json"))
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")

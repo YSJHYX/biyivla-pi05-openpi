@@ -885,6 +885,7 @@ _CONFIGS = [
         # Set these at launch time. An empty repo ID is rejected by the Stage-1 preflight.
         data=LeRobotBiyiVLADataConfig(
             repo_id=os.environ.get("BIYI_DATASET_REPO_ID", ""),
+            assets=AssetsConfig(asset_id="biyi_stage1"),
             base_config=DataConfig(
                 local_root=os.environ.get("BIYI_DATASET_LOCAL_ROOT") or None,
                 episode_indices=_biyi_stage1_episode_indices(),

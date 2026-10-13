@@ -146,13 +146,25 @@ def get_model_parameters(model):
     )
 
 
+def _should_save_checkpoint(global_step: int, num_train_steps: int, save_interval: int) -> bool:
+    return (global_step > 0 and global_step % save_interval == 0) or global_step == num_train_steps
+
+
+def _mean_loss_for_logging(loss: torch.Tensor, *, distributed: bool, world_size: int) -> float:
+    log_loss = loss.detach().float().clone()
+    if distributed:
+        dist.all_reduce(log_loss, op=dist.ReduceOp.SUM)
+        log_loss /= world_size
+    return log_loss.item()
+
+
 def save_checkpoint(model, optimizer, global_step, config, is_main, data_config):
     """Save a checkpoint with model state, optimizer state, and metadata."""
     if not is_main:
         return
 
     # Only save if it's time to save or if it's the final step
-    if (global_step % config.save_interval == 0 and global_step > 0) or global_step == config.num_train_steps - 1:
+    if _should_save_checkpoint(global_step, config.num_train_steps, config.save_interval):
         # Create temporary directory for atomic checkpoint saving
         final_ckpt_dir = config.checkpoint_dir / f"{global_step}"
         tmp_ckpt_dir = config.checkpoint_dir / f"tmp_{global_step}"
@@ -520,7 +532,7 @@ def train_loop(config: _config.TrainConfig):
     )
 
     while global_step < config.num_train_steps:
-        # Set epoch for distributed training
+        # Set the starting epoch; TorchDataLoader advances it after each full pass.
         if use_ddp and hasattr(loader, "set_epoch"):
             loader.set_epoch(global_step // len(loader))
 
@@ -568,11 +580,13 @@ def train_loop(config: _config.TrainConfig):
                     param.grad.detach_()
                     param.grad = None
 
+            log_loss = _mean_loss_for_logging(loss, distributed=use_ddp, world_size=world_size)
+
             # Collect stats
             if is_main:
                 infos.append(
                     {
-                        "loss": loss.item(),
+                        "loss": log_loss,
                         "learning_rate": optim.param_groups[0]["lr"],
                         "grad_norm": float(grad_norm) if isinstance(grad_norm, torch.Tensor) else grad_norm,
                     }
@@ -604,7 +618,7 @@ def train_loop(config: _config.TrainConfig):
                         "loss": avg_loss,
                         "learning_rate": avg_lr,
                         "step": global_step,
-                        "time_per_step": elapsed / config.log_interval,
+                        "time_per_step": elapsed / len(infos),
                     }
                     if avg_grad_norm is not None:
                         log_payload["grad_norm"] = avg_grad_norm

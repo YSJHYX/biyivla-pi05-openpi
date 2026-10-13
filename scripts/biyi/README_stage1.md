@@ -138,6 +138,13 @@ Metadata hashes do not prove that media and Parquet contents are immutable;
 freeze the snapshot externally before this step. Never point Stage-1 assets at
 the older Task 3B smoke stats.
 
+Stage-1 uses the fixed asset ID `biyi_stage1`, independent of the dataset repo
+ID. Stats and their source manifest are written under
+`<BIYI_ASSETS_BASE_DIR>/pi05_biyi_stage1/biyi_stage1/`; the stats file is
+`norm_stats.json`. Each saved checkpoint contains
+`assets/biyi_stage1/norm_stats.json`, so deployment resolves the same asset ID
+even when `BIYI_DATASET_REPO_ID` is unset.
+
 ## Smoke and training profiles
 
 Local smoke (one GPU; 3 optimizer steps by default):
@@ -197,6 +204,9 @@ despite accepting that CLI option. Planned roles: 1k early optimization check,
 and 10k provisional primary endpoint. These remain on disk unless an operator
 manages storage. `--resume` loads the latest numbered checkpoint and its
 optimizer state. No long run is started by preparation.
+With 10,000 steps and save interval 1000, saves occur at 1000, 2000, ..., 10000,
+without an extra 9999 save. The final step is also saved when it is not a
+multiple of the interval, for example 10500.
 
 ## AutoDL 2×H20 Cloud Bring-up Checklist
 
@@ -209,14 +219,15 @@ Verify actual usable capacity and mounts after boot. Expected driver is
 not the PyTorch runtime requirement. Use Python 3.11, Torch 2.7.1, and
 Transformers 4.53.2; do not upgrade them or pull upstream OpenPI for this run.
 
-**Runtime discrepancy to resolve before formal training:** the requested cloud
-target says PyTorch `2.7.1+cu128`, but the current `uv.lock` resolves PyPI
-Torch 2.7.1 with CUDA 12.6 packages, and the audited local `.venv` reports
-`2.7.1+cu126` / CUDA 12.6. `uv sync --frozen` reproduces the lock, not cu128.
-The cu128 combination has not been validated in this checkout. Record the
-actual cloud runtime and validate it through H20 smoke; if cu128 is mandatory,
-resolve and lock that dependency separately before the formal run. Host CUDA
-13.0 is not a reason to select cu130.
+The Stage-1 standard environment is Python 3.11, Torch 2.7.1, Transformers
+4.53.2, and the repository's frozen `uv.lock`. On x86 Linux this lock selects
+Torch `2.7.1+cu126` with the CUDA 12.6 runtime. Use `uv sync --frozen` to
+reproduce it; cu126 is the selected baseline and is not a pre-training blocker.
+Record the actual cloud runtime and validate it through H20 smoke. Reassess
+cu128 only if that smoke demonstrates a compatibility problem with cu126;
+do not upgrade preemptively or use cu130. The host's `nvidia-smi` CUDA 13.x
+version describes driver capability and does not require a CUDA 13 PyTorch
+runtime. Keep `uv.lock` unchanged for this run.
 
 ### Step 1 — SSH login
 
@@ -533,7 +544,7 @@ Estimate about 22 GB per complete model/optimizer checkpoint, then measure
 the first H20 save. The PyTorch trainer accepts `keep_period` but does not
 rotate checkpoints. Plan to keep the 1k, 3k, 5k, 8k, and 10k role checkpoints
 on the data disk, subject to measured available space. Only consider
-archiving/removing nondecision checkpoints such as 2k, 4k, or 4999 after
+archiving/removing nondecision checkpoints such as 2k or 4k after
 verifying a complete, readable save and any required remote copy. Do not automate deletion before
 the save/resume smoke. Monitor `du -sh "$BIYI_CHECKPOINT_BASE_DIR"` and
 `df -h "$BIYI_ROOT"` throughout training.
