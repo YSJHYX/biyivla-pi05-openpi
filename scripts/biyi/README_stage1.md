@@ -265,6 +265,7 @@ export HF_HOME="$BIYI_ROOT/hf_cache"
 export HF_DATASETS_CACHE="$BIYI_ROOT/hf_cache/datasets"
 export TORCH_HOME="$BIYI_ROOT/torch_cache"
 export XDG_CACHE_HOME="$BIYI_ROOT/cache"
+export OPENPI_DATA_HOME="$BIYI_ROOT/cache/openpi"
 export UV_CACHE_DIR="$BIYI_ROOT/cache/uv"
 export UV_PROJECT_ENVIRONMENT="$BIYI_ROOT/envs/openpi-stage1"
 export TMPDIR="$BIYI_ROOT/tmp"
@@ -273,6 +274,9 @@ export TMPDIR="$BIYI_ROOT/tmp"
 Keep these exports in the training shell/session. Monitor both filesystems:
 `df -h / "$BIYI_ROOT"`. PyTorch, HF, uv, checkpoints, and temporary files
 must not silently consume the system disk.
+OpenPI's `src/openpi/shared/download.py` uses `OPENPI_DATA_HOME` for its asset
+cache, defaulting to `~/.cache/openpi`. Keep that cache on the data disk as well;
+the AutoDL system disk has only about 30 GB.
 
 ### Step 4 — Validate GPUs and topology
 
@@ -354,8 +358,69 @@ PY
 ```
 
 Require Python 3.11, Torch 2.7.1, Transformers 4.53.2, and two visible H20s.
-Record CUDA runtime exactly; apply the discrepancy gate above before formal
-training. Do not change packages solely because the host reports CUDA 13.0.
+Record the CUDA runtime exactly; the frozen x86 Linux lock selects
+`2.7.1+cu126` / CUDA 12.6. Reassess cu128 only if H20 smoke demonstrates a
+compatibility problem. Do not change packages solely because the host reports
+CUDA 13.x.
+
+Apply the repository's `transformers_replace` files next. PyTorch π0.5 depends
+on patched Transformers 4.53.2 for AdaRMS, activation precision, and KV-cache
+behavior; `uv sync --frozen` does not copy these replacements. Resolve the
+installed directory through `BIYI_PYTHON`, which points to the data-disk
+environment:
+
+```bash
+TRANSFORMERS_DIR="$("$BIYI_PYTHON" - <<'PY'
+import pathlib
+import transformers
+
+print(pathlib.Path(transformers.__file__).parent)
+PY
+)"
+
+cp -r \
+  src/openpi/models_pytorch/transformers_replace/* \
+  "$TRANSFORMERS_DIR/"
+
+"$BIYI_PYTHON" - <<'PY'
+import transformers
+from transformers.models.siglip import check
+
+print("transformers:", transformers.__version__)
+print(
+    "transformers_replace:",
+    check.check_whether_transformers_replace_is_installed_correctly(),
+)
+
+assert transformers.__version__ == "4.53.2"
+assert check.check_whether_transformers_replace_is_installed_correctly()
+
+print("TRANSFORMERS_PATCH = PASS")
+PY
+```
+
+Require `transformers: 4.53.2`, `transformers_replace: True`, and
+`TRANSFORMERS_PATCH = PASS`; stop before H20 smoke if verification fails.
+
+Prefetch the PaliGemma tokenizer before proceeding to authentication, dataset,
+checkpoint, or smoke steps:
+
+```bash
+"$BIYI_PYTHON" - <<'PY'
+from openpi.models.tokenizer import PaligemmaTokenizer
+
+tokenizer = PaligemmaTokenizer(200)
+
+print("PALIGEMMA_TOKENIZER = PASS")
+PY
+```
+
+Require `PALIGEMMA_TOKENIZER = PASS`. This fetches
+`gs://big_vision/paligemma_tokenizer.model` into
+`$OPENPI_DATA_HOME/big_vision/paligemma_tokenizer.model`, confirming the GCS
+asset is accessible and cached on the data disk before training starts. If
+prefetch fails, resolve the reported network/cache error before H20 smoke.
+Keep the tokenizer asset out of Git.
 
 ### Step 8 — Authenticate Hugging Face and W&B
 
