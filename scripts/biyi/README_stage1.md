@@ -636,3 +636,10 @@ batch/step choice. These are intentional runtime gates, not code defects.
   the first checkpoint before setting formal save/retention plans.
 - W&B network drops: prefer direct cloud connectivity; an SSH reverse tunnel
   is dependent on the local computer remaining connected.
+
+## 正式 100-episode checkpoint 三层存储
+
+正式运行使用新增的可移植入口，默认实验名 `pi05_biyi_100ep_fft_v1`。
+参见 [checkpoint 存储与恢复操作手册](README_checkpoint_storage.md)，包含持久盘设置、
+冻结 revision、离线校验、私有 HF Model 归档门禁和跨机 optimizer 恢复。
+原 smoke 流程保持原样；本入口默认只输出计划，不能把 smoke 结果当成正式归档。

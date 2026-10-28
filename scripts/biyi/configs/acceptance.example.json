@@ -1,0 +1,12 @@
+{
+  "accepted": false,
+  "reviewer": "REPLACE_AFTER_OFFLINE_REVIEW",
+  "reviewed_at": "REPLACE_WITH_UTC_TIMESTAMP",
+  "checkpoint_manifest_sha256": "REPLACE_WITH_SHA256_PRINTED_BY_SEAL",
+  "checks": {
+    "offline_policy_load": false,
+    "finite_actions": false,
+    "action_shape_50_17": false
+  },
+  "evidence": ["offline_inference_report.json"]
+}
