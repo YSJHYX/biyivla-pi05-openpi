@@ -24,6 +24,7 @@ Multi-Node Training:
 """
 
 import dataclasses
+import datetime
 import gc
 import logging
 import os
@@ -96,7 +97,9 @@ def setup_ddp():
     use_ddp = world_size > 1
     if use_ddp and not torch.distributed.is_initialized():
         backend = "nccl" if torch.cuda.is_available() else "gloo"
-        torch.distributed.init_process_group(backend=backend, init_method="env://")
+        timeout = os.environ.get("BIYI_DDP_TIMEOUT_SECONDS")
+        kwargs = {"timeout": datetime.timedelta(seconds=int(timeout))} if timeout else {}
+        torch.distributed.init_process_group(backend=backend, init_method="env://", **kwargs)
 
         # Set up debugging environment variables for DDP issues
         if os.environ.get("TORCH_DISTRIBUTED_DEBUG") is None:
@@ -198,6 +201,13 @@ def save_checkpoint(model, optimizer, global_step, config, is_main, data_config)
         if final_ckpt_dir.exists():
             shutil.rmtree(final_ckpt_dir)
         tmp_ckpt_dir.rename(final_ckpt_dir)
+
+        # Formal launchers enable synchronous durable I/O after a complete atomic save.
+        # This does not change the stock model, optimizer, schedule or save contents.
+        if os.environ.get("BIYI_CHECKPOINT_IO") == "1":
+            from scripts.biyi.training_runtime import backup_checkpoint
+
+            backup_checkpoint(config.checkpoint_dir, global_step)
 
         logging.info(f"Saved checkpoint at step {global_step} -> {final_ckpt_dir}")
 
@@ -645,6 +655,11 @@ def train_loop(config: _config.TrainConfig):
     # Report PyTorch allocator peaks for every DDP rank, including AdamW state
     # materialized by the first optimizer step.
     log_memory_usage(device, global_step, "training_complete")
+
+    if os.environ.get("BIYI_MEMORY_SMOKE") == "1":
+        from scripts.biyi.training_runtime import record_memory_smoke
+
+        record_memory_smoke(config, device, global_step)
 
     # Finish wandb run
     if is_main and config.wandb_enabled:

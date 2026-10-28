@@ -1,3 +1,8 @@
+> Platform-independent formal training: see [README_portable_training.md](README_portable_training.md).
+> The unified launcher now selects 1/N GPUs and requires declared persistent storage
+> or verified synchronous backups, plus completed hardware memory smoke evidence.
+> The H20/AutoDL examples below are historical setup examples, not platform requirements.
+
 # Biyi π0.5 Stage-1 PyTorch template
 
 ## Stage-1 scope and verified baseline

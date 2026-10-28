@@ -107,7 +107,10 @@ def validate_run(run):
 
 
 def recipe(path=RECIPE):
-    value = read_json(path)
+    return validate_recipe(read_json(path))
+
+
+def validate_recipe(value):
     expected = {
         "schema_version": 1,
         "config_name": "pi05_biyi_stage1",
@@ -153,6 +156,11 @@ def storage_root(value):
     # Google Drive may be mounted under /content/drive; it is an explicit persistent exception.
     path = Path(value).expanduser()
     if path.is_absolute() and Path("/content/drive") in path.parents:
+        require(
+            Path("/content/drive").is_mount(),
+            "Mount Google Drive first; an ordinary /content/drive directory is temporary",
+        )
+        require(Path("/content/drive") in path.resolve().parents, "Drive path escapes its mount")
         require(REPO_ROOT not in path.resolve().parents, "Root must be outside Git")
         return path.resolve()
     return persistent_root(value)

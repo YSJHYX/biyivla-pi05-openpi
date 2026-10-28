@@ -107,3 +107,90 @@ def test_logging_loss_is_detached_global_mean(monkeypatch, distributed):
     assert loss.item() == 2.0
     loss.backward()
     assert loss.grad.item() == 1.0
+
+
+@dataclasses.dataclass
+class TinySaveConfig:
+    checkpoint_dir: object
+    num_train_steps: int = 2
+    save_interval: int = 2
+    wandb_enabled: bool = False
+
+
+def test_cpu_stock_save_durable_backup_and_optimizer_restore(monkeypatch, tmp_path):
+    """Exercise the actual stock save/load functions using a two-parameter CPU model."""
+    from types import SimpleNamespace
+
+    from openpi.shared import normalize
+    from scripts.biyi import checkpoint_store as store
+    from scripts.biyi import training_runtime as runtime
+
+    run = tmp_path / "runtime/checkpoints/pi05_biyi_stage1/cpu_fixture"
+    run.mkdir(parents=True)
+    store.write_json(run / "run_manifest.json", {"kind": "stage1_formal", "source_commit": "a" * 40})
+    store.write_json(run / "train_stats_manifest.json", {"fixture": True})
+    (run / "wandb_id.txt").write_text("fixture")
+    monkeypatch.setenv("BIYI_CHECKPOINT_IO", "1")
+    monkeypatch.setenv("BIYI_STORAGE_MODE", "backup")
+    monkeypatch.setenv("BIYI_BACKUP_ROOT", str(tmp_path / "durable"))
+    monkeypatch.setattr(store, "storage_root", lambda p: type(tmp_path)(p).resolve())
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(train_pytorch, "log_memory_usage", lambda *_: None)
+    model = torch.nn.Linear(1, 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+    model(torch.ones(1, 1)).sum().backward()
+    optimizer.step()
+    expected = {key: value.clone() for key, value in model.state_dict().items()}
+    original_optimizer = optimizer.state_dict()
+    stats = {
+        key: normalize.NormStats(mean=np.zeros(17), std=np.ones(17), q01=np.zeros(17), q99=np.ones(17))
+        for key in ("state", "actions")
+    }
+    train_pytorch.save_checkpoint(
+        model,
+        optimizer,
+        2,
+        TinySaveConfig(run),
+        is_main=True,
+        data_config=SimpleNamespace(norm_stats=stats, asset_id="biyi_stage1"),
+    )
+    backup = tmp_path / "durable/pi05_biyi_stage1/cpu_fixture/step-2"
+    restored = tmp_path / "restored/cpu_fixture"
+    runtime.restore_backup(backup, restored)
+    new_model = torch.nn.Linear(1, 1)
+    new_optimizer = torch.optim.AdamW(new_model.parameters(), lr=0.5)
+    step = train_pytorch.load_checkpoint(new_model, new_optimizer, restored, torch.device("cpu"))
+    assert step == 2
+    for key, value in expected.items():
+        torch.testing.assert_close(value, new_model.state_dict()[key])
+    assert new_optimizer.param_groups[0]["lr"] == 0.01
+    for key, state in original_optimizer["state"].items():
+        for field, value in state.items():
+            torch.testing.assert_close(value, new_optimizer.state_dict()["state"][key][field])
+    assert (restored / "2" / store.NORM).is_file()
+
+
+def test_stock_save_propagates_durable_backup_failure(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from scripts.biyi import training_runtime as runtime
+
+    def fail(*_):
+        raise OSError("persistent destination full")
+
+    monkeypatch.setenv("BIYI_CHECKPOINT_IO", "1")
+    monkeypatch.setattr(runtime, "backup_checkpoint", fail)
+    model = torch.nn.Linear(1, 1)
+    optimizer = torch.optim.AdamW(model.parameters())
+    with pytest.raises(OSError, match="persistent destination full"):
+        train_pytorch.save_checkpoint(
+            model,
+            optimizer,
+            2,
+            TinySaveConfig(tmp_path),
+            is_main=True,
+            data_config=SimpleNamespace(norm_stats=None, asset_id=None),
+        )
+    assert (tmp_path / "2/model.safetensors").is_file()
+    assert not (tmp_path / "tmp_2").exists()

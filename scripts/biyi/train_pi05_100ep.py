@@ -1,7 +1,7 @@
 """Portable formal 100-episode FFT launcher. Defaults to a read-only plan.
 
-The explicit train action runs the existing Stage-1 preflight and unmodified stock
-trainer. This module does not import torch, initialize CUDA, or train on import.
+The explicit train action runs the existing Stage-1 preflight and stock
+trainer with synchronous checkpoint I/O hooks. This module does not import torch, initialize CUDA, or train on import.
 """
 
 import argparse
@@ -13,10 +13,11 @@ import subprocess
 import sys
 
 from scripts.biyi import checkpoint_store as store
+from scripts.biyi import training_runtime as runtime
 
 
-def build_plan(root, revision, settings, *, resume=False):
-    root = store.storage_root(root)
+def build_plan(root, revision, settings, *, resume=False, use_environment_paths=False):
+    root = runtime.artifact_root(root) if os.environ.get("BIYI_STORAGE_MODE") == "backup" else store.storage_root(root)
     store.require(store.SHA.fullmatch(revision), "Use a full immutable dataset revision")
     experiment = settings["experiment"]
     dataset = root / "datasets" / revision
@@ -32,7 +33,23 @@ def build_plan(root, revision, settings, *, resume=False):
         "BIYI_BASE_CHECKPOINT_DIR": base,
         "BIYI_EXP_NAME": experiment,
         "BIYI_HF_CHECKPOINT_REPO_ID": store.MODEL_REPO,
+        "BIYI_DATASET_REVISION": revision,
     }
+    if use_environment_paths:
+        for key in (
+            "BIYI_DATASET_REPO_ID",
+            "BIYI_DATASET_LOCAL_ROOT",
+            "BIYI_ASSETS_BASE_DIR",
+            "BIYI_CHECKPOINT_BASE_DIR",
+        ):
+            if os.environ.get(key):
+                environment[key] = os.environ[key]
+        store.require(environment["BIYI_DATASET_REPO_ID"] == store.DATASET_REPO, "Formal dataset repo changed")
+        run_dir = runtime.artifact_root(environment["BIYI_CHECKPOINT_BASE_DIR"]) / "pi05_biyi_stage1" / experiment
+    environment["BIYI_CHECKPOINT_IO"] = "1"
+    environment["BIYI_MEMORY_SMOKE"] = "0"
+    environment["PYTHONPATH"] = str(store.REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    environment["BIYI_DDP_TIMEOUT_SECONDS"] = os.environ.get("BIYI_DDP_TIMEOUT_SECONDS", "3600")
     steps = settings["num_train_steps"]
     warmup = (steps + 5) // 10
     preflight = [
@@ -56,18 +73,9 @@ def build_plan(root, revision, settings, *, resume=False):
         "--end-lr",
         "2.5e-6",
     ]
-    launcher = (
-        [sys.executable]
-        if settings["num_gpus"] == 1
-        else [
-            sys.executable,
-            "-m",
-            "torch.distributed.run",
-            "--standalone",
-            "--nnodes=1",
-            f"--nproc_per_node={settings['num_gpus']}",
-        ]
-    )
+    count = runtime.gpu_count(settings["num_gpus"])
+    runtime.validate_batch(settings["batch_size"], count)
+    launcher = runtime.launch_prefix(count, torchrun=os.environ.get("BIYI_TORCHRUN"))
     command = [
         *launcher,
         "scripts/train_pytorch.py",
@@ -82,6 +90,10 @@ def build_plan(root, revision, settings, *, resume=False):
         str(steps),
         "--save-interval",
         str(settings["save_interval"]),
+        "--keep-period",
+        str(settings.get("keep_period", 5000)),
+        "--log-interval",
+        str(settings.get("log_interval", 5)),
         "--lr-schedule.warmup-steps",
         str(warmup),
         "--lr-schedule.decay-steps",
@@ -107,6 +119,10 @@ def build_plan(root, revision, settings, *, resume=False):
         "run_dir": str(run_dir),
         "dataset_revision": revision,
         "resume": resume,
+        "storage": {
+            "mode": os.environ.get("BIYI_STORAGE_MODE", "UNSET"),
+            "backup_root": os.environ.get("BIYI_BACKUP_ROOT"),
+        },
     }
 
 
@@ -155,10 +171,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("plan", "preflight", "train"), nargs="?", default="plan")
     parser.add_argument(
-        "--persistent-root",
-        default=os.environ.get("BIYI_PERSISTENT_ROOT"),
-        required=not os.environ.get("BIYI_PERSISTENT_ROOT"),
+        "--persistent-root", default=os.environ.get("BIYI_RUN_ROOT") or os.environ.get("BIYI_PERSISTENT_ROOT")
     )
+    parser.add_argument(
+        "--from-stage1-env", action="store_true", help="Honor existing Stage-1 path and recipe environment variables"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print a read-only plan; no preflight, CUDA or storage writes"
+    )
+    parser.add_argument("--num-gpus", help="Positive count or auto; defaults to the frozen recipe")
+    parser.add_argument("--batch-size", type=int)
     parser.add_argument(
         "--dataset-revision",
         default=os.environ.get("BIYI_DATASET_REVISION"),
@@ -168,12 +190,50 @@ def main():
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     settings = store.recipe(args.recipe)
-    plan = build_plan(args.persistent_root, args.dataset_revision, settings, resume=args.resume)
-    if args.action == "plan":
+    if args.from_stage1_env:
+        for key, variable in {
+            "experiment": "BIYI_EXP_NAME",
+            "num_train_steps": "BIYI_NUM_TRAIN_STEPS",
+            "batch_size": "BIYI_BATCH_SIZE",
+            "num_workers": "BIYI_NUM_WORKERS",
+            "save_interval": "BIYI_SAVE_INTERVAL",
+            "num_gpus": "BIYI_NUM_GPUS",
+            "keep_period": "BIYI_KEEP_PERIOD",
+            "log_interval": "BIYI_LOG_INTERVAL",
+        }.items():
+            if os.environ.get(variable):
+                value = os.environ[variable]
+                store.require(
+                    not (args.dry_run or args.action == "plan") or value != "auto",
+                    "Dry-run requires explicit GPU count",
+                )
+                settings[key] = (
+                    value if key == "experiment" else (runtime.gpu_count(value) if key == "num_gpus" else int(value))
+                )
+    if args.num_gpus is not None:
+        store.require(
+            not (args.dry_run or args.action == "plan") or args.num_gpus != "auto",
+            "Dry-run requires explicit GPU count",
+        )
+        settings["num_gpus"] = runtime.gpu_count(args.num_gpus)
+    if args.batch_size is not None:
+        settings["batch_size"] = args.batch_size
+    store.validate_recipe(settings)
+    root = args.persistent_root
+    if root is None and args.from_stage1_env:
+        root = str(Path(os.environ["BIYI_CHECKPOINT_BASE_DIR"]).parent)
+    store.require(root, "Set BIYI_PERSISTENT_ROOT or BIYI_RUN_ROOT")
+    plan = build_plan(
+        root, args.dataset_revision, settings, resume=args.resume, use_environment_paths=args.from_stage1_env
+    )
+    if args.action == "plan" or args.dry_run:
         print(json.dumps(plan, indent=2))
         return
+    runtime.gpu_count(settings["num_gpus"], verify=True)
+    policy = runtime.storage_policy(plan["environment"]["BIYI_CHECKPOINT_BASE_DIR"], probe=True)
     record, stats_dir = validate_storage(plan, settings)
-    environment = {**os.environ, **plan["environment"]}
+    environment = {**os.environ, **plan["environment"], "BIYI_STORAGE_DEVICE": policy["device"]}
+    runtime.check_memory_smoke(settings["batch_size"], settings["num_gpus"], environment=environment)
     subprocess.run(plan["preflight"], cwd=store.REPO_ROOT, env=environment, check=True)
     if args.action == "preflight":
         print("STORAGE AND EXISTING FORMAL PREFLIGHT PASS; training was not started")
@@ -183,6 +243,9 @@ def main():
         run_dir.mkdir(parents=True, exist_ok=False)
         store.write_json(run_dir / "run_manifest.json", record)
         shutil.copyfile(stats_dir / "stage1_train_stats_manifest.json", run_dir / "train_stats_manifest.json")
+    if args.resume:
+        steps = [int(p.name) for p in run_dir.iterdir() if p.is_dir() and p.name.isdigit()]
+        runtime.backup_checkpoint(run_dir, max(steps), environment=environment)
     subprocess.run(plan["train"], cwd=store.REPO_ROOT, env=environment, check=True)
 
 
