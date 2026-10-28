@@ -1,5 +1,6 @@
 """Compute Stage-1 norm stats from the selected frozen train split only."""
 
+import argparse
 import json
 from pathlib import Path
 
@@ -12,8 +13,36 @@ from scripts.biyi.preflight_pi05_stage1 import validate
 from scripts.compute_norm_stats import create_torch_dataloader
 
 
-def main() -> None:
+def main(argv=None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--numeric-only", action="store_true", help="Use verified Parquet vectors after normal preflight")
+    parser.add_argument("--source-inventory", type=Path, help="Pinned HF file identities; required for numeric-only")
+    parser.add_argument("--recipe", type=Path, help="Versioned recipe for numeric-only (default: 117 episodes)")
+    args = parser.parse_args(argv)
+    if args.numeric_only and args.source_inventory is None:
+        parser.error("--numeric-only requires --source-inventory")
+    if not args.numeric_only and (args.source_inventory is not None or args.recipe is not None):
+        parser.error("--source-inventory and --recipe require --numeric-only")
     config, identity = validate(require_stats=False)
+    if args.numeric_only:
+        from scripts.biyi import checkpoint_store as store
+        from scripts.biyi.compute_stage1_parquet_norm_stats import main as numeric_main
+
+        recipe_path = args.recipe or store.RECIPE_117
+        settings = store.recipe(recipe_path)
+        store.require(
+            identity["train_episode_indices"] == list(range(settings["dataset_episodes"]))
+            and identity["train_frame_count"] == settings.get("dataset_frames", identity["train_frame_count"]),
+            "Numeric stats recipe must match the effective training split",
+        )
+        numeric_main([
+            "--dataset-root", identity["local_root"],
+            "--source-inventory", str(args.source_inventory),
+            "--assets-base-dir", str(config.assets_base_dir),
+            "--recipe", str(recipe_path),
+            "--batch-size", str(config.batch_size),
+        ])
+        return
     data = config.data.create(config.assets_dirs, config.model)
     loader, num_batches = create_torch_dataloader(
         data, config.model.action_horizon, config.batch_size, config.model, config.num_workers
