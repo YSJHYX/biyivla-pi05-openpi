@@ -1,0 +1,32 @@
+name: Biyi portable training (CPU)
+on:
+  pull_request:
+    paths:
+      - 'scripts/biyi/**'
+      - 'scripts/train_pytorch.py'
+      - 'src/openpi/training/config.py'
+      - '.github/workflows/biyi-portable-training.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/biyi/**'
+      - 'scripts/train_pytorch.py'
+      - 'src/openpi/training/config.py'
+      - '.github/workflows/biyi-portable-training.yml'
+jobs:
+  offline-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CUDA_VISIBLE_DEVICES: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Shell and Python syntax
+        run: |
+          bash -n scripts/biyi/train_pi05_stage1.sh
+          python -m compileall -q scripts/biyi scripts/train_pytorch.py src/openpi/training/config.py
+      - name: Standard-library launch and lifecycle tests (no torch or GPU)
+        run: python -m unittest scripts.biyi.checkpoint_store_test scripts.biyi.training_runtime_test -q

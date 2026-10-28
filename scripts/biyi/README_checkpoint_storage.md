@@ -1,3 +1,8 @@
+> Launch/storage update: see [README_portable_training.md](README_portable_training.md)
+> for the unified shell/100-episode launcher, `BIYI_STORAGE_MODE`, actual GPU memory
+> smoke gate, temporary runtime + durable backup mode, and verified backup restore.
+> The three layers and the explicit accepted-only private HF Model upload gate below remain in force.
+
 # BiyiVLA 正式 100-episode checkpoint 存储
 
 本流程固定使用 stock **PyTorch π0.5 full fine-tuning**，AHFE 关闭、LoRA 关闭。
@@ -27,6 +32,7 @@ HF Model 仓库已于 2026-10-28 建为 private，通过存储契约文件写入
 Python 3.11 环境（下文 `python` 指该环境）；不更换依赖或 `uv.lock`。
 
 ```bash
+export BIYI_STORAGE_MODE=persistent
 export BIYI_PERSISTENT_ROOT=/mnt/persistent/biyivla
 export BIYI_DATASET_REVISION=REPLACE_WITH_40_CHARACTER_DATASET_COMMIT
 export BIYI_BASE_CHECKPOINT_DIR=/mnt/persistent/base/pi05_base_pytorch
@@ -91,6 +97,8 @@ stats 来源的机器路径，恢复工具会在完整数据 lock 验证后处�
 **只有以后明确决定开始训练时才运行：**
 
 ```bash
+# First complete the hardware smoke from README_portable_training.md, then:
+export BIYI_MEMORY_SMOKE_RUN_DIR=/mnt/persistent/biyivla/checkpoints/pi05_biyi_stage1/gpu_memory_smoke_v1
 python -m scripts.biyi.train_pi05_100ep train
 # 同机恢复最新已完成的数字 step；仍经过预检
 python -m scripts.biyi.train_pi05_100ep train --resume

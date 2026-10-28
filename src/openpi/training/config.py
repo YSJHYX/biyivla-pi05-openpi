@@ -892,10 +892,10 @@ _CONFIGS = [
                 prompt_from_task=True,
             ),
         ),
-        pytorch_weight_path=os.environ.get("BIYI_BASE_CHECKPOINT_DIR", "/data/openpi_checkpoints/pi05_base_pytorch"),
+        pytorch_weight_path=os.environ.get("BIYI_BASE_CHECKPOINT_DIR", "./checkpoints/pi05_base_pytorch"),
         assets_base_dir=os.environ.get("BIYI_ASSETS_BASE_DIR", "./assets"),
         checkpoint_base_dir=os.environ.get("BIYI_CHECKPOINT_BASE_DIR", "./checkpoints"),
-        batch_size=32,  # Provisional global batch; size on 2 x H20 before formal training.
+        batch_size=32,  # Provisional global batch; size on the actual GPUs before formal training.
         num_train_steps=10000,  # Provisional endpoint; freeze after dataset and memory sizing.
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1000,
