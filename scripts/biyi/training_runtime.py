@@ -110,7 +110,7 @@ def backup_checkpoint(run_dir, step, *, environment=None):
     names += [f"{step}/{name}" for name in ("model.safetensors", "optimizer.pt", "metadata.pt", store.NORM)]
     files = store.inventory(run_dir, names)
     record = store.read_json(run_dir / "run_manifest.json")
-    if record.get("kind") == "formal_100ep_fft":
+    if record.get("kind") in store.FORMAL_KINDS:
         store.seal_checkpoint(run_dir, step)
         names += [f"{step}/checkpoint_manifest.json"]
         files = store.inventory(run_dir, names)
@@ -161,7 +161,7 @@ def restore_backup(backup, run_dir, *, assets_base=None, dataset_root=None):
         store.validate_run(record)
         dataset_root = artifact_root(dataset_root)
         store.require(
-            store.dataset_identity(dataset_root, record["dataset"]["revision"]) == record["dataset"],
+            store.dataset_identity(dataset_root, record["dataset"]["revision"], record["recipe"]["dataset_episodes"]) == record["dataset"],
             "Restore frozen dataset first",
         )
         norm = store.file_at(backup, f"{step}/{store.NORM}")
@@ -260,7 +260,7 @@ def generic_run_manifest(run_dir, command, *, resume=False):
     info = store.read_json(data / "meta/info.json")
     selected = os.environ.get("BIYI_TRAIN_EPISODES", "")
     count = len(selected.split(",")) if selected else info["total_episodes"]
-    store.require(count != 100, "100-episode FFT requires train_pi05_100ep or BIYI_FORMAL_RECIPE")
+    store.require(count not in (100, 117), "100/117-episode FFT requires versioned launcher or BIYI_FORMAL_RECIPE")
     revision = os.environ.get("BIYI_DATASET_REVISION", "")
     store.require(store.SHA.fullmatch(revision), "Set the full immutable BIYI_DATASET_REVISION")
     lock = store.read_json(data / "dataset_lock.json")

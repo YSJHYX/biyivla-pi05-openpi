@@ -21,7 +21,7 @@ from scripts.biyi.check_cloud_auth import check_cloud_auth
 CONFIG_NAME = "pi05_biyi_stage1"
 BASE_WEIGHTS_SHA256 = "dbcbe3ea978ce1d6f791582fa034e7ece8a41feaad2d3c9a5b014c1938610e2a"
 BASE_WEIGHTS_SIZE = 7_233_650_408
-META_FILES = ("info.json", "episodes.jsonl", "tasks.jsonl")
+META_FILES = ("info.json", "episodes.jsonl", "tasks.jsonl", "episodes_stats.jsonl")
 
 
 def _sha256(path: Path) -> str:
@@ -79,6 +79,9 @@ def validate(
         if key not in features:
             raise ValueError(f"Missing {key}")
     episodes = [json.loads(line) for line in (root / "meta/episodes.jsonl").read_text().splitlines()]
+    episode_stats = [json.loads(line) for line in (root / "meta/episodes_stats.jsonl").read_text().splitlines()]
+    if [row["episode_index"] for row in episode_stats] != list(range(len(episodes))):
+        raise ValueError("Episode statistics order/count mismatch")
     tasks = [json.loads(line) for line in (root / "meta/tasks.jsonl").read_text().splitlines()]
     if not tasks or not all(isinstance(task.get("task"), str) and task["task"].strip() for task in tasks):
         raise ValueError("Collection-time task prompts are missing")
@@ -107,6 +110,11 @@ def validate(
         episode_ids = np.asarray(table["episode_index"].to_pylist()).reshape(-1)
         global_ids = np.asarray(table["index"].to_pylist()).reshape(-1)
         episode_tasks = np.asarray(table["task_index"].to_pylist()).reshape(-1)
+        for key, values in (("episode_index", episode_ids), ("index", global_ids), ("task_index", episode_tasks)):
+            actual = episode_stats[index]["stats"][key]
+            expected = {"count": len(values), "min": values.min(), "max": values.max(), "mean": values.mean(), "std": values.std()}
+            if any(np.asarray(actual.get(field)).shape != (1,) or not np.allclose(actual[field], [value], rtol=1e-9, atol=1e-6) for field, value in expected.items()):
+                raise ValueError(f"Episode {index} stale {key} statistics")
         if (
             not np.array_equal(frames, np.arange(row["length"]))
             or not np.all(episode_ids == index)

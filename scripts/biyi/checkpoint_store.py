@@ -21,6 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_REPO = "PPPPPilot/BiyiVLA-pi05-checkpoints"
 DATASET_REPO = "PPPPPilot/BiyiVLA"
 RECIPE = REPO_ROOT / "scripts/biyi/configs/pi05_biyi_100ep_fft_v1.json"
+RECIPE_117 = REPO_ROOT / "scripts/biyi/configs/pi05_biyi_117ep_fft_v1.json"
+FORMAL_KINDS = {"formal_100ep_fft", "formal_117ep_fft"}
 NORM = "assets/biyi_stage1/norm_stats.json"
 SHA = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -86,18 +88,22 @@ def check_inventory(root, entries):
 
 def validate_run(run):
     require(
-        run["kind"] == "formal_100ep_fft" and SHA.fullmatch(run["source_commit"]), "Formal source provenance missing"
+        run["kind"] in FORMAL_KINDS and SHA.fullmatch(run["source_commit"]), "Formal source provenance missing"
     )
     # The same recipe contract applies to locally created and downloaded releases.
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "recipe.json"
         write_json(path, run["recipe"])
         recipe(path)
+    count = run["recipe"]["dataset_episodes"]
+    require(run["kind"] == f"formal_{count}ep_fft", "Formal kind/episode count mismatch")
+    if run["recipe"].get("dataset_revision"):
+        require(run["dataset"]["revision"] == run["recipe"]["dataset_revision"], "Recipe/data revision mismatch")
     require(
         run["dataset"]["repo_id"] == DATASET_REPO
         and SHA.fullmatch(run["dataset"]["revision"])
-        and run["dataset"]["episodes"] == list(range(100)),
-        "Expected frozen 100-episode provenance",
+        and run["dataset"]["episodes"] == list(range(count)),
+        "Expected frozen recipe episode provenance",
     )
     require(
         all(SHA256.fullmatch(run[key]) for key in ("norm_stats_sha256", "base_model_sha256", "uv_lock_sha256"))
@@ -116,7 +122,6 @@ def validate_recipe(value):
         "config_name": "pi05_biyi_stage1",
         "dataset_repo": DATASET_REPO,
         "model_repo": MODEL_REPO,
-        "dataset_episodes": 100,
         "backend": "stock_pytorch_pi05",
         "ahfe": False,
         "lora": False,
@@ -126,7 +131,12 @@ def validate_recipe(value):
         all(type(value.get(k)) is type(v) and value[k] == v for k, v in expected.items()),
         "Only stock PyTorch pi05 FFT, AHFE off and LoRA off are supported",
     )
-    require(re.fullmatch(r"pi05_biyi_100ep_fft_v[1-9][0-9]*", value["experiment"]), "Invalid formal name")
+    count = value.get("dataset_episodes")
+    require(type(count) is int and count in (100, 117), "Supported frozen episode counts are 100 and 117")
+    require(re.fullmatch(rf"pi05_biyi_{count}ep_fft_v[1-9][0-9]*", value["experiment"]), "Invalid formal name")
+    if count == 117:
+        require(value.get("dataset_frames") == 77975, "117-episode recipe requires 77975 frames")
+        require(SHA.fullmatch(value.get("dataset_revision", "")), "117-episode recipe requires pinned dataset revision")
     for name in ("num_train_steps", "batch_size", "num_gpus", "save_interval"):
         require(type(value[name]) is int and value[name] > 0, f"Invalid {name}")
     require(
@@ -192,7 +202,8 @@ def freeze_dataset(root, revision):
     print(destination)
 
 
-def dataset_identity(path, revision):
+def dataset_identity(path, revision, episode_count=100):
+    require(type(episode_count) is int and episode_count in (100, 117), "Unsupported episode count")
     lock = read_json(file_at(path, "dataset_lock.json"))
     require(
         SHA.fullmatch(revision) and lock["revision"] == revision and lock["repo_id"] == DATASET_REPO,
@@ -202,16 +213,16 @@ def dataset_identity(path, revision):
     actual = {p.relative_to(path).as_posix() for p in Path(path).rglob("*") if p.is_file() or p.is_symlink()}
     require(actual == set(lock["files"]) | {"dataset_lock.json"}, "Frozen dataset contains unexpected files")
     info = read_json(file_at(path, "meta/info.json"))
-    require(info["total_episodes"] == 100, "Formal v1 requires exactly 100 episodes")
+    require(info["total_episodes"] == episode_count, f"Formal recipe requires exactly {episode_count} episodes")
     episodes = [json.loads(line) for line in file_at(path, "meta/episodes.jsonl").read_text().splitlines()]
     require(
-        len(episodes) == 100 and [row["episode_index"] for row in episodes] == list(range(100)),
-        "Expected episodes 0..99",
+        len(episodes) == episode_count and [row["episode_index"] for row in episodes] == list(range(episode_count)),
+        "Expected contiguous frozen episode IDs",
     )
     return {
         "repo_id": DATASET_REPO,
         "revision": revision,
-        "episodes": list(range(100)),
+        "episodes": list(range(episode_count)),
         "lock_sha256": digest(Path(path) / "dataset_lock.json"),
     }
 
@@ -266,7 +277,7 @@ def inspect_checkpoint(run_dir, step):
     require(
         provenance["norm_stats_sha256"] == run["norm_stats_sha256"]
         and provenance["repo_id"] == DATASET_REPO
-        and provenance["train_episode_indices"] == list(range(100)),
+        and provenance["train_episode_indices"] == run["dataset"]["episodes"],
         "Training stats provenance mismatch",
     )
     check_safetensors(ckpt / "model.safetensors")
@@ -400,7 +411,7 @@ def verify_bundle(path):
     run = read_json(path / "run_manifest.json")
     validate_run(run)
     require(
-        run["recipe"]["experiment"] == manifest["experiment"] and run["kind"] == "formal_100ep_fft",
+        run["recipe"]["experiment"] == manifest["experiment"] and run["kind"] in FORMAL_KINDS,
         "Wrong formal experiment",
     )
     require(
@@ -456,7 +467,7 @@ def upload(path, confirm):
 def download(root, revision, prefix, output):
     require(SHA.fullmatch(revision), "Download requires immutable HF model commit")
     require(
-        re.fullmatch(r"(inference|resume)/pi05_biyi_100ep_fft_v[1-9][0-9]*/step-[1-9][0-9]*", prefix),
+        re.fullmatch(r"(inference|resume)/pi05_biyi_(100|117)ep_fft_v[1-9][0-9]*/step-[1-9][0-9]*", prefix),
         "Invalid release prefix",
     )
     from huggingface_hub import snapshot_download
@@ -484,7 +495,7 @@ def restore(bundle, root):
     )
     dataset_path = root / "datasets" / run["dataset"]["revision"]
     require(
-        dataset_identity(dataset_path, run["dataset"]["revision"]) == run["dataset"],
+        dataset_identity(dataset_path, run["dataset"]["revision"], run["recipe"]["dataset_episodes"]) == run["dataset"],
         "Restore the frozen dataset before restoring the run",
     )
     destination = root / "checkpoints/pi05_biyi_stage1" / manifest["experiment"]

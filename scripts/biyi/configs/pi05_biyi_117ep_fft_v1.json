@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "experiment": "pi05_biyi_117ep_fft_v1",
+  "config_name": "pi05_biyi_stage1",
+  "dataset_repo": "PPPPPilot/BiyiVLA",
+  "model_repo": "PPPPPilot/BiyiVLA-pi05-checkpoints",
+  "dataset_episodes": 117,
+  "dataset_frames": 77975,
+  "dataset_revision": "5ffc4e58e4307fab8a02a9f34aa4d975008ffa5d",
+  "backend": "stock_pytorch_pi05",
+  "ahfe": false,
+  "lora": false,
+  "num_train_steps": 20000,
+  "batch_size": 8,
+  "num_workers": 0,
+  "num_gpus": 1,
+  "save_interval": 2000,
+  "seed": 42
+}

@@ -243,7 +243,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual((restored / "run_manifest.json").read_bytes(), (self.run / "run_manifest.json").read_bytes())
         stats_path = target / "assets/pi05_biyi_stage1/biyi_stage1/stage1_train_stats_manifest.json"
         rebound = store.read_json(stats_path)
-        self.assertEqual(rebound["local_root"], str((target / "datasets" / ("b" * 40)).resolve()))
+        self.assertEqual(rebound["local_root"], str((target / "datasets" / self.record["dataset"]["revision"]).resolve()))
         self.assertEqual(rebound["norm_stats_sha256"], self.record["norm_stats_sha256"])
 
     def test_truncated_safetensors_rejected(self):

@@ -5,6 +5,10 @@
 
 # BiyiVLA 正式 100-episode checkpoint 存储
 
+117 条冻结数据集的配方、完整恢复及归档契约见
+[README_stage1_117ep.md](README_stage1_117ep.md)。下文保留原 100 条配方说明；
+两种数量均有严格校验，不能把 117 条快照当作 100 条运行。
+
 本流程固定使用 stock **PyTorch π0.5 full fine-tuning**，AHFE 关闭、LoRA 关闭。
 保留现有 `scripts/train_pytorch.py`、模型、优化器、数据变换、Stage-1 preflight、
 smoke 启动器和 `uv.lock`。新增入口默认只输出计划，不启动训练。

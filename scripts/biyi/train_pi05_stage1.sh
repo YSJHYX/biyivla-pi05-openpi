@@ -32,13 +32,17 @@ fi
 : "${BIYI_ASSETS_BASE_DIR:?Set a dedicated Stage-1 stats directory}"
 : "${BIYI_CHECKPOINT_BASE_DIR:?Set a dedicated Stage-1 checkpoint directory}"
 
-# Versioned 100-episode formal runs retain the existing strict lifecycle gate.
-if [[ "$profile" =~ ^(train|preflight)$ ]] && { [[ -n "${BIYI_FORMAL_RECIPE:-}" ]] || [[ "${BIYI_EXP_NAME:-}" == pi05_biyi_100ep_fft_v* ]]; }; then
+# Versioned formal runs retain the strict lifecycle gate for their episode count.
+if [[ "$profile" =~ ^(train|preflight)$ ]] && { [[ -n "${BIYI_FORMAL_RECIPE:-}" ]] || [[ "${BIYI_EXP_NAME:-}" == pi05_biyi_100ep_fft_v* || "${BIYI_EXP_NAME:-}" == pi05_biyi_117ep_fft_v* ]]; }; then
   formal_args=("$profile" --from-stage1-env)
-  if [[ -n "${BIYI_FORMAL_RECIPE:-}" ]]; then formal_args+=(--recipe "$BIYI_FORMAL_RECIPE"); fi
+  if [[ -n "${BIYI_FORMAL_RECIPE:-}" ]]; then
+    formal_args+=(--recipe "$BIYI_FORMAL_RECIPE")
+  elif [[ "${BIYI_EXP_NAME:-}" == pi05_biyi_100ep_fft_v* ]]; then
+    formal_args+=(--recipe "$PWD/scripts/biyi/configs/pi05_biyi_100ep_fft_v1.json")
+  fi
   if [[ "${BIYI_RESUME:-0}" == "1" ]]; then formal_args+=(--resume); fi
   if [[ "$dry_run" == "1" ]]; then formal_args+=(--dry-run); fi
-  exec "$python_bin" -m scripts.biyi.train_pi05_100ep "${formal_args[@]}"
+  exec "$python_bin" -m scripts.biyi.train_pi05_fft "${formal_args[@]}"
 fi
 
 if [[ "$profile" == "compute-stats" ]]; then

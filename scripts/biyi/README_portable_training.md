@@ -1,5 +1,9 @@
 # Portable stock PyTorch π0.5 formal training
 
+For the corrected 117-episode / 77,975-frame Stage-1 snapshot, use
+[README_stage1_117ep.md](README_stage1_117ep.md). It pins the corrected dataset
+and batch-8 / 20k recipe while preserving the legacy 100-episode lifecycle.
+
 `biyivla-pi05-openpi` remains the only training code repository. AutoDL, Colab,
 local servers and other GPU hosts use the same `train_pi05_stage1.sh` launcher,
 `pi05_biyi_stage1` configuration and `scripts/train_pytorch.py`. There is no

@@ -1,4 +1,4 @@
-"""Portable formal 100-episode FFT launcher. Defaults to a read-only plan.
+"""Portable formal versioned FFT launcher (legacy module name). Defaults to a read-only plan.
 
 The explicit train action runs the existing Stage-1 preflight and stock
 trainer with synchronous checkpoint I/O hooks. This module does not import torch, initialize CUDA, or train on import.
@@ -19,6 +19,8 @@ from scripts.biyi import training_runtime as runtime
 def build_plan(root, revision, settings, *, resume=False, use_environment_paths=False):
     root = runtime.artifact_root(root) if os.environ.get("BIYI_STORAGE_MODE") == "backup" else store.storage_root(root)
     store.require(store.SHA.fullmatch(revision), "Use a full immutable dataset revision")
+    if settings.get("dataset_revision"):
+        store.require(revision == settings["dataset_revision"], "Dataset revision differs from frozen recipe")
     experiment = settings["experiment"]
     dataset = root / "datasets" / revision
     run_dir = root / "checkpoints/pi05_biyi_stage1" / experiment
@@ -27,7 +29,7 @@ def build_plan(root, revision, settings, *, resume=False, use_environment_paths=
     environment = {
         "BIYI_DATASET_REPO_ID": store.DATASET_REPO,
         "BIYI_DATASET_LOCAL_ROOT": str(dataset),
-        "BIYI_TRAIN_EPISODES": ",".join(map(str, range(100))),
+        "BIYI_TRAIN_EPISODES": ",".join(map(str, range(settings["dataset_episodes"]))),
         "BIYI_ASSETS_BASE_DIR": str(root / "assets"),
         "BIYI_CHECKPOINT_BASE_DIR": str(root / "checkpoints"),
         "BIYI_BASE_CHECKPOINT_DIR": base,
@@ -129,14 +131,19 @@ def build_plan(root, revision, settings, *, resume=False, use_environment_paths=
 def validate_storage(plan, settings):
     store.require(not store.git("status", "--porcelain"), "Formal runs require a clean committed source tree")
     env = plan["environment"]
-    dataset = store.dataset_identity(Path(env["BIYI_DATASET_LOCAL_ROOT"]), plan["dataset_revision"])
+    dataset = store.dataset_identity(
+        Path(env["BIYI_DATASET_LOCAL_ROOT"]), plan["dataset_revision"], settings["dataset_episodes"]
+    )
+    if settings.get("dataset_frames"):
+        info = store.read_json(Path(env["BIYI_DATASET_LOCAL_ROOT"]) / "meta/info.json")
+        store.require(info["total_frames"] == settings["dataset_frames"], "Frozen frame count changed")
     stats_dir = Path(env["BIYI_ASSETS_BASE_DIR"]) / "pi05_biyi_stage1/biyi_stage1"
     stats_path = store.file_at(stats_dir, "norm_stats.json")
     stats_manifest = store.read_json(store.file_at(stats_dir, "stage1_train_stats_manifest.json"))
     store.require(stats_manifest["norm_stats_sha256"] == store.digest(stats_path), "Stats checksum mismatch")
     store.require(
-        stats_manifest["repo_id"] == store.DATASET_REPO and stats_manifest["train_episode_indices"] == list(range(100)),
-        "Stats are not from the 100 train episodes",
+        stats_manifest["repo_id"] == store.DATASET_REPO and stats_manifest["train_episode_indices"] == list(range(settings["dataset_episodes"])),
+        "Stats are not from the frozen recipe train episodes",
     )
     for name, expected in stats_manifest["metadata_sha256"].items():
         store.require(
@@ -146,7 +153,7 @@ def validate_storage(plan, settings):
     base = store.file_at(env["BIYI_BASE_CHECKPOINT_DIR"], "model.safetensors")
     record = {
         "schema_version": 1,
-        "kind": "formal_100ep_fft",
+        "kind": f"formal_{settings['dataset_episodes']}ep_fft",
         "source_commit": store.git("rev-parse", "HEAD"),
         "recipe": settings,
         "dataset": dataset,
@@ -167,7 +174,7 @@ def validate_storage(plan, settings):
     return record, stats_dir
 
 
-def main():
+def main(default_recipe=store.RECIPE):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("plan", "preflight", "train"), nargs="?", default="plan")
     parser.add_argument(
@@ -186,7 +193,7 @@ def main():
         default=os.environ.get("BIYI_DATASET_REVISION"),
         required=not os.environ.get("BIYI_DATASET_REVISION"),
     )
-    parser.add_argument("--recipe", type=Path, default=store.RECIPE)
+    parser.add_argument("--recipe", type=Path, default=default_recipe)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     settings = store.recipe(args.recipe)
