@@ -1,0 +1,126 @@
+--- a/scripts/biyi/compute_stage1_norm_stats.py
++++ b/scripts/biyi/compute_stage1_norm_stats.py
+@@ -1,5 +1,6 @@
+ """Compute Stage-1 norm stats from the selected frozen train split only."""
+ 
++import argparse
+ import json
+ from pathlib import Path
+ 
+@@ -12,8 +13,36 @@
+ from scripts.compute_norm_stats import create_torch_dataloader
+ 
+ 
+-def main() -> None:
++def main(argv=None) -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--numeric-only", action="store_true", help="Use verified Parquet vectors after normal preflight")
++    parser.add_argument("--source-inventory", type=Path, help="Pinned HF file identities; required for numeric-only")
++    parser.add_argument("--recipe", type=Path, help="Versioned recipe for numeric-only (default: 117 episodes)")
++    args = parser.parse_args(argv)
++    if args.numeric_only and args.source_inventory is None:
++        parser.error("--numeric-only requires --source-inventory")
++    if not args.numeric_only and (args.source_inventory is not None or args.recipe is not None):
++        parser.error("--source-inventory and --recipe require --numeric-only")
+     config, identity = validate(require_stats=False)
++    if args.numeric_only:
++        from scripts.biyi import checkpoint_store as store
++        from scripts.biyi.compute_stage1_parquet_norm_stats import main as numeric_main
++
++        recipe_path = args.recipe or store.RECIPE_117
++        settings = store.recipe(recipe_path)
++        store.require(
++            identity["train_episode_indices"] == list(range(settings["dataset_episodes"]))
++            and identity["train_frame_count"] == settings.get("dataset_frames", identity["train_frame_count"]),
++            "Numeric stats recipe must match the effective training split",
++        )
++        numeric_main([
++            "--dataset-root", identity["local_root"],
++            "--source-inventory", str(args.source_inventory),
++            "--assets-base-dir", str(config.assets_base_dir),
++            "--recipe", str(recipe_path),
++            "--batch-size", str(config.batch_size),
++        ])
++        return
+     data = config.data.create(config.assets_dirs, config.model)
+     loader, num_batches = create_torch_dataloader(
+         data, config.model.action_horizon, config.batch_size, config.model, config.num_workers
+--- a/scripts/biyi/compute_stage1_parquet_norm_stats.py
++++ b/scripts/biyi/compute_stage1_parquet_norm_stats.py
+@@ -35,14 +35,17 @@
+         yield {"state": state, "actions": action}
+ 
+ 
+-def main():
++def main(argv=None):
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--dataset-root", type=Path, required=True)
+     parser.add_argument("--source-inventory", type=Path, required=True)
+     parser.add_argument("--assets-base-dir", type=Path, required=True)
+     parser.add_argument("--recipe", type=Path, default=store.RECIPE_117)
+-    args = parser.parse_args()
++    parser.add_argument("--batch-size", type=int, help="Match the calling stats loader's batch boundaries")
++    args = parser.parse_args(argv)
+     settings = store.recipe(args.recipe)
++    batch_size = settings["batch_size"] if args.batch_size is None else args.batch_size
++    store.require(batch_size > 0, "Stats batch size must be positive")
+     source = store.read_json(args.source_inventory)
+     root = args.dataset_root.resolve()
+     store.require(source["repo_id"] == store.DATASET_REPO, "Wrong numeric source repo")
+@@ -107,7 +110,7 @@
+     store.require(not output.exists(), "Stats destination already exists; never overwrite")
+     stats = {key: normalize.RunningStats() for key in ("state", "actions")}
+     counts = dict.fromkeys(stats, 0)
+-    for index, batch in enumerate(numeric_batches(vectors(), settings["batch_size"])):
++    for index, batch in enumerate(numeric_batches(vectors(), batch_size)):
+         for key, running in stats.items():
+             running.update(batch[key])
+             counts[key] += batch[key].reshape(-1, 17).shape[0]
+@@ -144,6 +147,7 @@
+             "inventory_sha256": store.digest(args.source_inventory),
+             "source_commit": store.git("rev-parse", "HEAD"),
+             "method": "stock_RunningStats_episode_clamped_50_step_actions",
++            "batch_size": batch_size,
+             "state_count": counts["state"],
+             "action_count": counts["actions"],
+         },
+--- /dev/null
++++ b/scripts/biyi/stage1_norm_entry_test.py
+@@ -0,0 +1,37 @@
++"""Ensure the public stats entry preserves its effective split and batch order."""
++
++from types import SimpleNamespace
++
++import pytest
++
++from scripts.biyi import compute_stage1_norm_stats as entry
++from scripts.biyi import compute_stage1_parquet_norm_stats as numeric
++
++
++def test_numeric_entry_keeps_effective_loader_batch_and_paths(monkeypatch, tmp_path):
++    identity = {"train_episode_indices": list(range(117)), "train_frame_count": 77975, "local_root": str(tmp_path)}
++    config = SimpleNamespace(assets_base_dir=tmp_path / "assets", batch_size=32)
++    monkeypatch.setattr(entry, "validate", lambda **kwargs: (config, identity))
++    calls = []
++    monkeypatch.setattr(numeric, "main", calls.append)
++    inventory = tmp_path / "inventory.json"
++    entry.main(["--numeric-only", "--source-inventory", str(inventory)])
++    options = dict(zip(calls[0][::2], calls[0][1::2], strict=True))
++    assert options["--batch-size"] == "32"
++    assert options["--dataset-root"] == str(tmp_path)
++    assert options["--assets-base-dir"] == str(config.assets_base_dir)
++    assert options["--source-inventory"] == str(inventory)
++
++
++def test_numeric_entry_rejects_a_different_effective_split(monkeypatch, tmp_path):
++    identity = {"train_episode_indices": list(range(100)), "train_frame_count": 77975, "local_root": str(tmp_path)}
++    monkeypatch.setattr(entry, "validate", lambda **kwargs: (SimpleNamespace(), identity))
++    monkeypatch.setattr(numeric, "main", lambda args: pytest.fail("must reject before computing stats"))
++    with pytest.raises(ValueError, match="effective training split"):
++        entry.main(["--numeric-only", "--source-inventory", str(tmp_path / "inventory.json")])
++
++
++def test_numeric_entry_requires_pinned_inventory():
++    with pytest.raises(SystemExit) as error:
++        entry.main(["--numeric-only"])
++    assert error.value.code == 2

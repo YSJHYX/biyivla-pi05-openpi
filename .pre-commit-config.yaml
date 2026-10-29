@@ -1,4 +1,4 @@
-exclude: third_party/
+exclude: ^(?:third_party/|docs/experiments/2026-10-28-stage1/cloud_sources/)
 
 repos:
   - repo: https://github.com/astral-sh/uv-pre-commit

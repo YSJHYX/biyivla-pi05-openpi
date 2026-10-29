@@ -1,0 +1,313 @@
+{
+  "all_source_bytes_preserved": true,
+  "checkpoint_model_commit": "b6433d277226ac28b344a5d53d59a3ed922a5630",
+  "credential_literal_scan": "no_candidates_found",
+  "distinct_auxiliary_files": 32,
+  "exact_recipe_files": 1,
+  "experiment": "pi05_biyi_117ep_fft_v2",
+  "records": [
+    {
+      "bytes": 2043,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/stage1_env.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/stage1_env.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "d3a5340382aea9ecd7e6b0f4633ba3777da2fa0463a871dfcbf665a324b1ea5f"
+    },
+    {
+      "bytes": 267,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/stage1_network_env.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/stage1_network_env.sh",
+      "role": "historical_http_proxy_binding",
+      "sha256": "bad6631d507784d2eccf514fc109e1f34bd1cb8fe7d5b7db7f692b510485b5cf"
+    },
+    {
+      "bytes": 19139,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/action_trajectory_export_step2/export.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/action_trajectory_export_step2/export.py",
+      "role": "historical_experiment_helper",
+      "sha256": "1ee3ece940103248a525b445bb6376b07976e93d9ceff1cd48de2ba705ed8b73"
+    },
+    {
+      "bytes": 19673,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/action_trajectory_export_step2/export.v2.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/action_trajectory_export_step2/export.v2.py",
+      "role": "historical_experiment_helper",
+      "sha256": "34580b1e3a8202a3361fe6d563b2103a7e788a3d9aba4d0528b34d56754a8855"
+    },
+    {
+      "bytes": 18546,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/archive_preflight_20261020/preflight.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/archive_preflight_20261020/preflight.py",
+      "role": "historical_experiment_helper",
+      "sha256": "7c92c8422e211260c2377a773d3da3cec4ce9a678a8a46bb0db3515f6f721325"
+    },
+    {
+      "bytes": 20003,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/checkpoint_reload_inference/validate.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/checkpoint_reload_inference/validate.py",
+      "role": "historical_experiment_helper",
+      "sha256": "95b8184cc83249cc85004520b1c0ee48c781066839609981a9a37e238b46fc19"
+    },
+    {
+      "bytes": 9200,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_full_audit.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_full_audit.py",
+      "role": "historical_experiment_helper",
+      "sha256": "9b203a0ecd52d6941c3bada3257e53c6f0fced9af98fd3068eb0e204767699e3"
+    },
+    {
+      "bytes": 6339,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_stats_entry.patch"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_stats_entry.patch",
+      "role": "historical_patch_not_a_runtime_entry",
+      "sha256": "d1f787290ec3d3397754798c9ca79318d07f373f281a5234bd6afb07c92095b5"
+    },
+    {
+      "bytes": 7643,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_gpu_sizing.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_gpu_sizing.py",
+      "role": "historical_experiment_helper",
+      "sha256": "9895e4872ab4cc2942eeac64dd81e5f933ba65e1bdcfc2ae3b3b0352f8b33543"
+    },
+    {
+      "bytes": 1054,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/preparation_env.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/preparation_env.sh",
+      "role": "experiment_paths_and_original_network_binding",
+      "sha256": "2afb345b2a16329a5985880f133a1f2087ab8fb54c6060cbc4971734a75633d4"
+    },
+    {
+      "bytes": 573,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/resume_download.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/resume_download.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "1cbe54d0d2eef71dd91bff38061b62ad1db3e4615372fee984030df48374f589"
+    },
+    {
+      "bytes": 4982,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_pack_only.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_pack_only.py",
+      "role": "historical_experiment_helper",
+      "sha256": "241ab7ba8cee9677e6c20f50c2985c94870e19d4795f5041da6889e7ba6490c5"
+    },
+    {
+      "bytes": 4805,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_verify_norm_and_loader.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_verify_norm_and_loader.py",
+      "role": "historical_experiment_helper",
+      "sha256": "639b5ca0a4433d14b4aecad25a9a13057e672a81726cf5eaaa3503349487a01f"
+    },
+    {
+      "bytes": 361,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/run_full_audit.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/run_full_audit.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "93f9583733d29d50920b9f3e12fe7f1f28b9653175d5362ca36d36af04e0aaf7"
+    },
+    {
+      "bytes": 560,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/run_norm_and_sizing.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/run_norm_and_sizing.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "d08011ce1017ac0f178f52a585f067a9dc01431936f0b1e9b33619d57f588919"
+    },
+    {
+      "bytes": 7917,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_gpu_sizing_optional8.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_gpu_sizing_optional8.py",
+      "role": "historical_experiment_helper",
+      "sha256": "78f4f3658adc71d6479d7223d671c2a1a47e8c2e13ea3081ed00effa39dfd692"
+    },
+    {
+      "bytes": 937,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/run_optional_batch8.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/run_optional_batch8.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "d68efe1c4f20688593002b7d8aed224e69294a0fc9f3f7e051f2cd0b54c13fa3"
+    },
+    {
+      "bytes": 9687,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_formal_experiment_monitor.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_formal_experiment_monitor.py",
+      "role": "historical_experiment_helper",
+      "sha256": "0770d5b608760fabbf5c4dc7aae2468e7948534b5bffb0aab043e66b90a81e88"
+    },
+    {
+      "bytes": 329,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/run_formal_experiment_monitor.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/run_formal_experiment_monitor.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "d6c1690ef4df64f5a8de962ba7ee1ccf4b725c2067ec8f9df5a01453965782a0"
+    },
+    {
+      "bytes": 4543,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_final_technical_check.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_final_technical_check.py",
+      "role": "historical_experiment_helper",
+      "sha256": "e4ca930bcd2ca2d4c5650f410bfd98e39245f159e45dfa05f518fa8c9e97ab0d"
+    },
+    {
+      "bytes": 7120,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_summarize_experiment.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_summarize_experiment.py",
+      "role": "historical_experiment_helper",
+      "sha256": "cc2c5e14b38a557023ffadc6bfc7b162736e86b8522594add96372a181fc1a4b"
+    },
+    {
+      "bytes": 1494,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_wandb_metric_audit.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_wandb_metric_audit.py",
+      "role": "historical_experiment_helper",
+      "sha256": "7ac8b20590f368889a43a9b5f5de4dc92c48924ac3e9cb70c00d4fa7d2a71804"
+    },
+    {
+      "bytes": 507,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/run_final_checks.sh"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/run_final_checks.sh",
+      "role": "historical_experiment_helper",
+      "sha256": "8241e9b02c6dc74f8aadc8ad1ebe144557bfccf4a9a8e5eb57d886575cb81348"
+    },
+    {
+      "bytes": 7670,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_build_archive_evidence.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_build_archive_evidence.py",
+      "role": "historical_experiment_helper",
+      "sha256": "b544cfa838534737d39f2f3a31345ad61f0b89b5dcb85dab942f0a5deb5f75fa"
+    },
+    {
+      "bytes": 4996,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_augment_timing_report.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_augment_timing_report.py",
+      "role": "historical_experiment_helper",
+      "sha256": "0164d93fd7e5f91d13f3194d4209087b432a075590b14ff7b173273aa07a8bb0"
+    },
+    {
+      "bytes": 7776,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_archive_final.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_archive_final.py",
+      "role": "unexecuted_superseded_full_readback_proposal",
+      "sha256": "7190483aecea8c6b43afc6ef0c91e0e024fd6a24cc1b74bb16a4bed00280b585"
+    },
+    {
+      "bytes": 4969,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_upload_metadata_verify.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_upload_metadata_verify.py",
+      "role": "final_9747_metadata_verification_before_visibility_change",
+      "sha256": "5518dd2264ae182c4905915b8754567d6bbd81a146dfd578f8d443b4103ae775"
+    },
+    {
+      "bytes": 4691,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_checkpoint_technical_check.py",
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/final_reports/pi05_biyi_117ep_fft_v2_20261029/archive_scripts/biyivla_checkpoint_technical_check.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_checkpoint_technical_check.py",
+      "role": "checkpoint_specific_offline_technical_checks",
+      "sha256": "199aa79cbfdd0da93c2fddfc544f2343e3b67c61361b458df2b5e89d1619de1e"
+    },
+    {
+      "bytes": 4835,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_upload_metadata_step.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_upload_metadata_step.py",
+      "role": "superseded_private_only_upload_helper",
+      "sha256": "406a9f357bfc41705ee5a5b685b64147c053de36464870c1854168cc5ff4f3cd"
+    },
+    {
+      "bytes": 7199,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_archive_intermediate.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_archive_intermediate.py",
+      "role": "superseded_private_only_archive_controller",
+      "sha256": "1073a8b3e44a6f783a16a74d81d1cafece73591d4de0807d3c1fc35ef86b5776"
+    },
+    {
+      "bytes": 8030,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_upload_metadata_public_step.py",
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/final_reports/pi05_biyi_117ep_fft_v2_20261029/archive_scripts/biyivla_upload_metadata_public_step.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_upload_metadata_public_step.py",
+      "role": "final_explicit_public_upload_with_bounded_existing_transport",
+      "sha256": "e7eb35afbddec4d26e1c47b324300c6d80fb35af898f5a7e05aa721bab8bc782"
+    },
+    {
+      "bytes": 8020,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/biyivla_archive_intermediate_public.py",
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/final_reports/pi05_biyi_117ep_fft_v2_20261029/archive_scripts/biyivla_archive_intermediate_public.py"
+      ],
+      "repository_path": "docs/experiments/2026-10-28-stage1/cloud_sources/logs/preparation_20261028/biyivla_archive_intermediate_public.py",
+      "role": "final_explicit_public_archive_controller",
+      "sha256": "c876ed490442da6e8b572f342445c910552136737a377661f0fb88c5070a31ab"
+    },
+    {
+      "bytes": 530,
+      "original_cloud_paths": [
+        "/root/autodl-tmp/biyivla/logs/preparation_20261028/pi05_biyi_117ep_fft_v2.json"
+      ],
+      "repository_path": "scripts/biyi/configs/pi05_biyi_117ep_fft_v2.json",
+      "role": "exact_completed_fft_recipe",
+      "sha256": "5c70f3514bd7d645f49636f7eceac904a835ee881562ce61a695e6c41ff10868"
+    }
+  ],
+  "schema_version": 1,
+  "trained_source_base": "897bd7f8822e011cb970bb93b312f93824105353",
+  "trained_source_commit": "dd8a85b16f46d081eb3f7813e87763fb0cb3c1aa"
+}
