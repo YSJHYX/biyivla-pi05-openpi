@@ -35,14 +35,17 @@ def numeric_batches(episodes, batch_size, horizon=50):
         yield {"state": state, "actions": action}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--source-inventory", type=Path, required=True)
     parser.add_argument("--assets-base-dir", type=Path, required=True)
     parser.add_argument("--recipe", type=Path, default=store.RECIPE_117)
-    args = parser.parse_args()
+    parser.add_argument("--batch-size", type=int, help="Match the calling stats loader's batch boundaries")
+    args = parser.parse_args(argv)
     settings = store.recipe(args.recipe)
+    batch_size = settings["batch_size"] if args.batch_size is None else args.batch_size
+    store.require(batch_size > 0, "Stats batch size must be positive")
     source = store.read_json(args.source_inventory)
     root = args.dataset_root.resolve()
     store.require(source["repo_id"] == store.DATASET_REPO, "Wrong numeric source repo")
@@ -107,7 +110,7 @@ def main():
     store.require(not output.exists(), "Stats destination already exists; never overwrite")
     stats = {key: normalize.RunningStats() for key in ("state", "actions")}
     counts = dict.fromkeys(stats, 0)
-    for index, batch in enumerate(numeric_batches(vectors(), settings["batch_size"])):
+    for index, batch in enumerate(numeric_batches(vectors(), batch_size)):
         for key, running in stats.items():
             running.update(batch[key])
             counts[key] += batch[key].reshape(-1, 17).shape[0]
@@ -144,6 +147,7 @@ def main():
             "inventory_sha256": store.digest(args.source_inventory),
             "source_commit": store.git("rev-parse", "HEAD"),
             "method": "stock_RunningStats_episode_clamped_50_step_actions",
+            "batch_size": batch_size,
             "state_count": counts["state"],
             "action_count": counts["actions"],
         },

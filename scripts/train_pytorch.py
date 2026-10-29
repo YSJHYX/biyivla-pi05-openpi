@@ -26,9 +26,11 @@ Multi-Node Training:
 import dataclasses
 import datetime
 import gc
+import json
 import logging
 import os
 import platform
+import resource
 import shutil
 import time
 
@@ -90,6 +92,9 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, enabled: bool = T
             project=config.project_name,
         )
         (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
+        if config.name == "pi05_biyi_stage1" and (ckpt_dir / "run_manifest.json").is_file():
+            manifest = json.loads((ckpt_dir / "run_manifest.json").read_text())
+            wandb.config.update({"reproducibility": manifest})
 
 
 def setup_ddp():
@@ -213,7 +218,20 @@ def save_checkpoint(model, optimizer, global_step, config, is_main, data_config)
 
         # Log checkpoint to wandb
         if config.wandb_enabled:
-            wandb.log({"checkpoint_step": global_step}, step=global_step)
+            payload = {"checkpoint_step": global_step}
+            if config.name == "pi05_biyi_stage1":
+                from scripts.biyi.training_metrics import append_metrics
+                from scripts.biyi.training_metrics import checkpoint_metrics
+
+                payload.update(
+                    checkpoint_metrics(
+                        final_ckpt_dir,
+                        backup_verified=os.environ.get("BIYI_CHECKPOINT_IO") == "1"
+                        and os.environ.get("BIYI_STORAGE_MODE") == "backup",
+                    )
+                )
+                append_metrics(config.checkpoint_dir / "checkpoint_metrics.jsonl", payload)
+            wandb.log(payload, step=global_step)
 
 
 def load_checkpoint(model, optimizer, checkpoint_dir, device):
@@ -379,6 +397,12 @@ def train_loop(config: _config.TrainConfig):
 
     # Pass the original batch size to data loader - it will handle DDP splitting internally
     loader, data_config = build_datasets(config)
+    train_frames = None
+    if config.name == "pi05_biyi_stage1":
+        from scripts.biyi.training_metrics import train_frame_count
+
+        train_frames = train_frame_count(data_config.local_root, data_config.episode_indices)
+        logging.info("Usable starting-frame samples: %s; horizon tails remain episode-clamped", train_frames)
 
     # Log sample images to wandb on first batch
     if is_main and config.wandb_enabled and not resuming:
@@ -569,6 +593,8 @@ def train_loop(config: _config.TrainConfig):
                 losses = torch.tensor(losses, device=device, dtype=torch.float32)
 
             loss = losses.mean()
+            if config.name == "pi05_biyi_stage1" and not torch.isfinite(loss):
+                raise RuntimeError("Nonfinite loss; refusing optimizer update")
 
             # Backward pass
             loss.backward()
@@ -579,6 +605,8 @@ def train_loop(config: _config.TrainConfig):
 
             # Gradient clipping
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optimizer.clip_gradient_norm)
+            if config.name == "pi05_biyi_stage1" and not torch.isfinite(grad_norm):
+                raise RuntimeError("Nonfinite gradient norm; refusing optimizer update")
 
             # Optimizer step
             optim.step()
@@ -622,8 +650,8 @@ def train_loop(config: _config.TrainConfig):
                     else f"step={global_step} loss={avg_loss:.4f} lr={avg_lr:.2e} time={elapsed:.1f}s"
                 )
 
-                # Log to wandb
-                if config.wandb_enabled and len(infos) > 0:
+                # Preserve a local numeric history as well as online W&B metrics.
+                if len(infos) > 0:
                     log_payload = {
                         "loss": avg_loss,
                         "learning_rate": avg_lr,
@@ -632,7 +660,26 @@ def train_loop(config: _config.TrainConfig):
                     }
                     if avg_grad_norm is not None:
                         log_payload["grad_norm"] = avg_grad_norm
-                    wandb.log(log_payload, step=global_step)
+                    if train_frames is not None:
+                        from scripts.biyi.training_metrics import append_metrics
+                        from scripts.biyi.training_metrics import exposure_metrics
+
+                        log_payload.update(exposure_metrics(global_step + 1, config.batch_size, train_frames))
+                        log_payload["system/cpu_peak_rss_bytes"] = (
+                            resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+                        )
+                        if torch.cuda.is_available():
+                            log_payload.update(
+                                {
+                                    "gpu/memory_allocated_bytes": torch.cuda.memory_allocated(device),
+                                    "gpu/memory_reserved_bytes": torch.cuda.memory_reserved(device),
+                                    "gpu/peak_allocated_bytes": torch.cuda.max_memory_allocated(device),
+                                    "gpu/peak_reserved_bytes": torch.cuda.max_memory_reserved(device),
+                                }
+                            )
+                        append_metrics(config.checkpoint_dir / "training_metrics.jsonl", log_payload)
+                    if config.wandb_enabled:
+                        wandb.log(log_payload, step=global_step + 1 if train_frames is not None else global_step)
 
                 start_time = time.time()
                 infos = []  # Reset stats collection
