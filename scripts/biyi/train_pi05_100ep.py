@@ -142,7 +142,8 @@ def validate_storage(plan, settings):
     stats_manifest = store.read_json(store.file_at(stats_dir, "stage1_train_stats_manifest.json"))
     store.require(stats_manifest["norm_stats_sha256"] == store.digest(stats_path), "Stats checksum mismatch")
     store.require(
-        stats_manifest["repo_id"] == store.DATASET_REPO and stats_manifest["train_episode_indices"] == list(range(settings["dataset_episodes"])),
+        stats_manifest["repo_id"] == store.DATASET_REPO
+        and stats_manifest["train_episode_indices"] == list(range(settings["dataset_episodes"])),
         "Stats are not from the frozen recipe train episodes",
     )
     for name, expected in stats_manifest["metadata_sha256"].items():

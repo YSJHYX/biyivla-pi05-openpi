@@ -161,7 +161,8 @@ def restore_backup(backup, run_dir, *, assets_base=None, dataset_root=None):
         store.validate_run(record)
         dataset_root = artifact_root(dataset_root)
         store.require(
-            store.dataset_identity(dataset_root, record["dataset"]["revision"], record["recipe"]["dataset_episodes"]) == record["dataset"],
+            store.dataset_identity(dataset_root, record["dataset"]["revision"], record["recipe"]["dataset_episodes"])
+            == record["dataset"],
             "Restore frozen dataset first",
         )
         norm = store.file_at(backup, f"{step}/{store.NORM}")

@@ -87,9 +87,7 @@ def check_inventory(root, entries):
 
 
 def validate_run(run):
-    require(
-        run["kind"] in FORMAL_KINDS and SHA.fullmatch(run["source_commit"]), "Formal source provenance missing"
-    )
+    require(run["kind"] in FORMAL_KINDS and SHA.fullmatch(run["source_commit"]), "Formal source provenance missing")
     # The same recipe contract applies to locally created and downloaded releases.
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "recipe.json"

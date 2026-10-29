@@ -15,7 +15,9 @@ from scripts.compute_norm_stats import create_torch_dataloader
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--numeric-only", action="store_true", help="Use verified Parquet vectors after normal preflight")
+    parser.add_argument(
+        "--numeric-only", action="store_true", help="Use verified Parquet vectors after normal preflight"
+    )
     parser.add_argument("--source-inventory", type=Path, help="Pinned HF file identities; required for numeric-only")
     parser.add_argument("--recipe", type=Path, help="Versioned recipe for numeric-only (default: 117 episodes)")
     args = parser.parse_args(argv)
@@ -35,13 +37,20 @@ def main(argv=None) -> None:
             and identity["train_frame_count"] == settings.get("dataset_frames", identity["train_frame_count"]),
             "Numeric stats recipe must match the effective training split",
         )
-        numeric_main([
-            "--dataset-root", identity["local_root"],
-            "--source-inventory", str(args.source_inventory),
-            "--assets-base-dir", str(config.assets_base_dir),
-            "--recipe", str(recipe_path),
-            "--batch-size", str(config.batch_size),
-        ])
+        numeric_main(
+            [
+                "--dataset-root",
+                identity["local_root"],
+                "--source-inventory",
+                str(args.source_inventory),
+                "--assets-base-dir",
+                str(config.assets_base_dir),
+                "--recipe",
+                str(recipe_path),
+                "--batch-size",
+                str(config.batch_size),
+            ]
+        )
         return
     data = config.data.create(config.assets_dirs, config.model)
     loader, num_batches = create_torch_dataloader(

@@ -112,8 +112,18 @@ def validate(
         episode_tasks = np.asarray(table["task_index"].to_pylist()).reshape(-1)
         for key, values in (("episode_index", episode_ids), ("index", global_ids), ("task_index", episode_tasks)):
             actual = episode_stats[index]["stats"][key]
-            expected = {"count": len(values), "min": values.min(), "max": values.max(), "mean": values.mean(), "std": values.std()}
-            if any(np.asarray(actual.get(field)).shape != (1,) or not np.allclose(actual[field], [value], rtol=1e-9, atol=1e-6) for field, value in expected.items()):
+            expected = {
+                "count": len(values),
+                "min": values.min(),
+                "max": values.max(),
+                "mean": values.mean(),
+                "std": values.std(),
+            }
+            if any(
+                np.asarray(actual.get(field)).shape != (1,)
+                or not np.allclose(actual[field], [value], rtol=1e-9, atol=1e-6)
+                for field, value in expected.items()
+            ):
                 raise ValueError(f"Episode {index} stale {key} statistics")
         if (
             not np.array_equal(frames, np.arange(row["length"]))
