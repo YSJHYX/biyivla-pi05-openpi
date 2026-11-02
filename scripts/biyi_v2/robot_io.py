@@ -1,17 +1,16 @@
-import numpy as np
 import time
 
+import numpy as np
+
+
 def build_observation(arm_q, hand_q, head_rgb, wrist_rgb, prompt):
-    # TODO：拼接 state，并组织原生 policy 所需的 observation
-    observation = {
+    # TODO:拼接 state,并组织原生 policy 所需的 observation
+    return {
         "state": np.concatenate([arm_q, hand_q], dtype=np.float32),
-        "images": {
-            "head": head_rgb,
-            "wrist": wrist_rgb
-        },
-        "prompt": prompt
+        "images": {"head": head_rgb, "wrist": wrist_rgb},
+        "prompt": prompt,
     }
-    return observation
+
 
 def read_observation(
     arm_backend,
@@ -20,7 +19,7 @@ def read_observation(
     wrist_camera,
     prompt,
 ):
-    # TODO：读取设备数据，再调用 build_observation
+    # TODO:读取设备数据,再调用 build_observation
     t = time.monotonic_ns()
     arm_feedback = arm_backend.joint_state()
     if arm_feedback is None or not arm_feedback.valid:
@@ -38,8 +37,9 @@ def read_observation(
 
     return build_observation(arm_q, hand_state_proxy, head_rgb, wrist_rgb, prompt)
 
+
 def send_action(action, arm_backend, hand_driver):
-    # TODO：拆分一行 17D action，调用现有设备接口
+    # TODO:拆分一行 17D action,调用现有设备接口
     action = np.asarray(action, dtype=np.float32)
     if action.shape != (17,) or not np.isfinite(action).all():
         raise ValueError("Action must be an finite 17D vector.")
@@ -49,8 +49,6 @@ def send_action(action, arm_backend, hand_driver):
     hand_sent = hand_driver.send_mode7_active_allowlist(tuple(range(11)), hand_q.tolist())
     if hand_sent is None:
         raise RuntimeError("Failed to send hand action.")
-    arm_sent = arm_backend.send_joint_target(arm_q.tolist())
-    hand_command_proxy_rad = np.deg2rad(hand_sent.requested_positions_deg, dtype=np.float32)  # Convert back to radians for feedback
-    # TODO：返回手部已接受目标对应的 SDK-user 弧度
-    return hand_command_proxy_rad
-    
+    arm_backend.send_joint_target(arm_q.tolist())
+    # TODO:返回手部已接受目标对应的 SDK-user 弧度
+    return np.deg2rad(hand_sent.requested_positions_deg, dtype=np.float32)
