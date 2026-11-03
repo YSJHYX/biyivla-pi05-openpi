@@ -567,6 +567,8 @@ class TrainConfig:
     log_interval: int = 100
     # How often (in steps) to save checkpoints.
     save_interval: int = 1000
+    # If provided, replaces periodic PyTorch saves; the final step is always saved.
+    checkpoint_steps: tuple[int, ...] | None = None
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
     keep_period: int | None = 5000
 
@@ -1096,8 +1098,8 @@ if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
 _CONFIGS_DICT = {config.name: config for config in _CONFIGS}
 
 
-def cli() -> TrainConfig:
-    return tyro.extras.overridable_config_cli({k: (k, v) for k, v in _CONFIGS_DICT.items()})
+def cli(args: list[str] | None = None) -> TrainConfig:
+    return tyro.extras.overridable_config_cli({k: (k, v) for k, v in _CONFIGS_DICT.items()}, args=args)
 
 
 def get_config(config_name: str) -> TrainConfig:

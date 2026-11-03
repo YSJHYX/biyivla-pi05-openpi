@@ -110,7 +110,7 @@ def backup_checkpoint(run_dir, step, *, environment=None):
     names += [f"{step}/{name}" for name in ("model.safetensors", "optimizer.pt", "metadata.pt", store.NORM)]
     files = store.inventory(run_dir, names)
     record = store.read_json(run_dir / "run_manifest.json")
-    if record.get("kind") in store.FORMAL_KINDS:
+    if store.is_formal_kind(record.get("kind")):
         store.seal_checkpoint(run_dir, step)
         names += [f"{step}/checkpoint_manifest.json"]
         files = store.inventory(run_dir, names)

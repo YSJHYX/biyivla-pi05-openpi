@@ -13,9 +13,24 @@ fi
 python_bin="${BIYI_PYTHON:-.venv/bin/python}"
 torchrun_bin="${BIYI_TORCHRUN:-.venv/bin/torchrun}"
 dry_run="${BIYI_DRY_RUN:-0}"
-if [[ "${2:-}" == "--dry-run" ]]; then dry_run=1; fi
-if [[ -n "${2:-}" && "${2:-}" != "--dry-run" ]] || (( $# > 2 )); then
-  echo "Only --dry-run is accepted after the profile" >&2; exit 2
+shift
+extra_args=()
+while (( $# )); do
+  case "$1" in
+    --dry-run) dry_run=1; shift ;;
+    --checkpoint_step|--checkpoint-step|--checkpoint-steps)
+      extra_args+=("$1"); shift
+      while (( $# )) && [[ "$1" != --* ]]; do extra_args+=("$1"); shift; done
+      ;;
+    --checkpoint_step=*|--checkpoint-step=*|--checkpoint-steps=*) extra_args+=("$1"); shift ;;
+    --dataset-root|--dataset-revision|--exp-name|--num-train-steps|--batch-size|--num-gpus|--recipe|--persistent-root)
+      if (( $# < 2 )); then echo "Missing value for $1" >&2; exit 2; fi
+      extra_args+=("$1" "$2"); shift 2 ;;
+    *) echo "Unsupported argument: $1" >&2; exit 2 ;;
+  esac
+done
+if (( ${#extra_args[@]} )) && [[ ! "$profile" =~ ^(train|preflight)$ ]]; then
+  echo "Dataset/step arguments are supported by train and preflight profiles" >&2; exit 2
 fi
 
 if [[ "$dry_run" == "1" && "$profile" =~ ^(auth-check|compute-stats)$ ]]; then
@@ -33,7 +48,7 @@ fi
 : "${BIYI_CHECKPOINT_BASE_DIR:?Set a dedicated Stage-1 checkpoint directory}"
 
 # Versioned formal runs retain the strict lifecycle gate for their episode count.
-if [[ "$profile" =~ ^(train|preflight)$ ]] && { [[ -n "${BIYI_FORMAL_RECIPE:-}" ]] || [[ "${BIYI_EXP_NAME:-}" == pi05_biyi_100ep_fft_v* || "${BIYI_EXP_NAME:-}" == pi05_biyi_117ep_fft_v* ]]; }; then
+if [[ "$profile" =~ ^(train|preflight)$ ]] && { (( ${#extra_args[@]} )) || [[ -n "${BIYI_CHECKPOINT_STEPS:-}" || -n "${BIYI_FORMAL_RECIPE:-}" ]] || [[ "${BIYI_EXP_NAME:-}" == pi05_biyi_100ep_fft_v* || "${BIYI_EXP_NAME:-}" == pi05_biyi_117ep_fft_v* ]]; }; then
   formal_args=("$profile" --from-stage1-env)
   if [[ -n "${BIYI_FORMAL_RECIPE:-}" ]]; then
     formal_args+=(--recipe "$BIYI_FORMAL_RECIPE")
@@ -42,6 +57,7 @@ if [[ "$profile" =~ ^(train|preflight)$ ]] && { [[ -n "${BIYI_FORMAL_RECIPE:-}" 
   fi
   if [[ "${BIYI_RESUME:-0}" == "1" ]]; then formal_args+=(--resume); fi
   if [[ "$dry_run" == "1" ]]; then formal_args+=(--dry-run); fi
+  formal_args+=("${extra_args[@]}")
   exec "$python_bin" -m scripts.biyi.train_pi05_fft "${formal_args[@]}"
 fi
 

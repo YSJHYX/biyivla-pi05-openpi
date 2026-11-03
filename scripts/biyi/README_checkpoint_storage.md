@@ -3,6 +3,10 @@
 > smoke gate, temporary runtime + durable backup mode, and verified backup restore.
 > The three layers and the explicit accepted-only private HF Model upload gate below remain in force.
 
+> New formal runs support dataset-derived counts and an explicit checkpoint
+> schedule; see [current parameters](README_portable_training.md#per-dataset-frames-and-explicit-checkpoint-steps).
+> The 100-episode examples below describe the original historical recipe.
+
 # BiyiVLA 正式 100-episode checkpoint 存储
 
 117 条冻结数据集的配方、完整恢复及归档契约见

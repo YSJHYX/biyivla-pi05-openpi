@@ -32,6 +32,7 @@ import os
 import platform
 import resource
 import shutil
+import sys
 import time
 
 import jax
@@ -154,8 +155,16 @@ def get_model_parameters(model):
     )
 
 
-def _should_save_checkpoint(global_step: int, num_train_steps: int, save_interval: int) -> bool:
-    return (global_step > 0 and global_step % save_interval == 0) or global_step == num_train_steps
+def _should_save_checkpoint(
+    global_step: int, num_train_steps: int, save_interval: int, checkpoint_steps: tuple[int, ...] | None = None
+) -> bool:
+    if global_step <= 0 or global_step > num_train_steps:
+        return False
+    if global_step == num_train_steps:
+        return True
+    if checkpoint_steps is not None:
+        return global_step in checkpoint_steps
+    return global_step % save_interval == 0
 
 
 def _mean_loss_for_logging(loss: torch.Tensor, *, distributed: bool, world_size: int) -> float:
@@ -172,7 +181,9 @@ def save_checkpoint(model, optimizer, global_step, config, is_main, data_config)
         return
 
     # Only save if it's time to save or if it's the final step
-    if _should_save_checkpoint(global_step, config.num_train_steps, config.save_interval):
+    if _should_save_checkpoint(
+        global_step, config.num_train_steps, config.save_interval, getattr(config, "checkpoint_steps", None)
+    ):
         # Create temporary directory for atomic checkpoint saving
         final_ckpt_dir = config.checkpoint_dir / f"{global_step}"
         tmp_ckpt_dir = config.checkpoint_dir / f"tmp_{global_step}"
@@ -347,6 +358,11 @@ def log_memory_usage(device, step, phase="unknown"):
 
 
 def train_loop(config: _config.TrainConfig):
+    from scripts.biyi.checkpoint_schedule import parse_checkpoint_steps
+
+    config = dataclasses.replace(
+        config, checkpoint_steps=parse_checkpoint_steps(config.checkpoint_steps, config.num_train_steps)
+    )
     use_ddp, local_rank, device = setup_ddp()
     is_main = (not use_ddp) or (dist.get_rank() == 0)
     set_seed(config.seed, local_rank)
@@ -717,7 +733,9 @@ def train_loop(config: _config.TrainConfig):
 
 def main():
     init_logging()
-    config = _config.cli()
+    from scripts.biyi.checkpoint_schedule import normalize_checkpoint_argv
+
+    config = _config.cli(args=normalize_checkpoint_argv(sys.argv[1:]))
     train_loop(config)
 
 

@@ -1,5 +1,11 @@
 # Frozen 117-episode Stage-1 FFT
 
+This page records the historical 117-episode experiment. New formal runs read
+their episode/frame counts from the supplied snapshot and support explicit
+`--checkpoint_step` lists. See the current
+[parameter examples](README_portable_training.md#per-dataset-frames-and-explicit-checkpoint-steps).
+Original recipe JSON files and historical checkpoint provenance are preserved.
+
 This recipe uses all 117 episodes (0..116), 77,975 frames, 30 FPS and the
 single air-fryer basket task. There is no held-out validation split. Training
 loss alone cannot establish policy quality. The immutable corrected dataset is

@@ -8,15 +8,17 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 
 from scripts.biyi import checkpoint_store as store
 from scripts.biyi import training_runtime as runtime
+from scripts.biyi.checkpoint_schedule import parse_checkpoint_steps
 
 
-def build_plan(root, revision, settings, *, resume=False, use_environment_paths=False):
+def build_plan(root, revision, settings, *, resume=False, use_environment_paths=False, dataset_root=None):
     root = runtime.artifact_root(root) if os.environ.get("BIYI_STORAGE_MODE") == "backup" else store.storage_root(root)
     store.require(store.SHA.fullmatch(revision), "Use a full immutable dataset revision")
     if settings.get("dataset_revision"):
@@ -48,6 +50,8 @@ def build_plan(root, revision, settings, *, resume=False, use_environment_paths=
                 environment[key] = os.environ[key]
         store.require(environment["BIYI_DATASET_REPO_ID"] == store.DATASET_REPO, "Formal dataset repo changed")
         run_dir = runtime.artifact_root(environment["BIYI_CHECKPOINT_BASE_DIR"]) / "pi05_biyi_stage1" / experiment
+    if dataset_root is not None:
+        environment["BIYI_DATASET_LOCAL_ROOT"] = str(Path(dataset_root).expanduser().resolve())
     environment["BIYI_CHECKPOINT_IO"] = "1"
     environment["BIYI_MEMORY_SMOKE"] = "0"
     environment["PYTHONPATH"] = str(store.REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
@@ -112,6 +116,8 @@ def build_plan(root, revision, settings, *, resume=False, use_environment_paths=
         "--project-name",
         "BiyiVLA-Stage1",
     ]
+    if settings.get("checkpoint_steps") is not None:
+        command.extend(["--checkpoint-steps", *map(str, settings["checkpoint_steps"])])
     if resume:
         command.append("--resume")
     return {
@@ -121,6 +127,7 @@ def build_plan(root, revision, settings, *, resume=False, use_environment_paths=
         "run_dir": str(run_dir),
         "dataset_revision": revision,
         "resume": resume,
+        "recipe": settings,
         "storage": {
             "mode": os.environ.get("BIYI_STORAGE_MODE", "UNSET"),
             "backup_root": os.environ.get("BIYI_BACKUP_ROOT"),
@@ -175,6 +182,20 @@ def validate_storage(plan, settings):
     return record, stats_dir
 
 
+def resolve_dataset_settings(settings, dataset_root, revision, *, experiment=None):
+    """Resolve this run from the supplied snapshot, not historical recipe counts."""
+    settings = {**settings, **store.dataset_metadata(dataset_root)}
+    settings["dataset_revision"] = revision
+    settings["dataset_from_metadata"] = True
+    if experiment is not None:
+        settings["experiment"] = experiment
+    else:
+        settings["experiment"] = re.sub(
+            r"(?<=pi05_biyi_)[0-9]+(?=ep_fft_v)", str(settings["dataset_episodes"]), settings["experiment"]
+        )
+    return store.validate_recipe(settings)
+
+
 def main(default_recipe=store.RECIPE):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("plan", "preflight", "train"), nargs="?", default="plan")
@@ -189,6 +210,17 @@ def main(default_recipe=store.RECIPE):
     )
     parser.add_argument("--num-gpus", help="Positive count or auto; defaults to the frozen recipe")
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--dataset-root", type=Path, help="Frozen LeRobot snapshot; counts are read from its metadata")
+    parser.add_argument("--exp-name", help="New versioned formal experiment name")
+    parser.add_argument("--num-train-steps", type=int)
+    parser.add_argument(
+        "--checkpoint_step",
+        "--checkpoint-step",
+        "--checkpoint-steps",
+        dest="checkpoint_steps",
+        nargs="+",
+        help="Explicit save steps, separated by spaces and/or commas; final step is always saved",
+    )
     parser.add_argument(
         "--dataset-revision",
         default=os.environ.get("BIYI_DATASET_REVISION"),
@@ -198,6 +230,7 @@ def main(default_recipe=store.RECIPE):
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     settings = store.recipe(args.recipe)
+    experiment = args.exp_name
     if args.from_stage1_env:
         for key, variable in {
             "experiment": "BIYI_EXP_NAME",
@@ -218,6 +251,7 @@ def main(default_recipe=store.RECIPE):
                 settings[key] = (
                     value if key == "experiment" else (runtime.gpu_count(value) if key == "num_gpus" else int(value))
                 )
+        experiment = args.exp_name or os.environ.get("BIYI_EXP_NAME")
     if args.num_gpus is not None:
         store.require(
             not (args.dry_run or args.action == "plan") or args.num_gpus != "auto",
@@ -226,19 +260,51 @@ def main(default_recipe=store.RECIPE):
         settings["num_gpus"] = runtime.gpu_count(args.num_gpus)
     if args.batch_size is not None:
         settings["batch_size"] = args.batch_size
-    store.validate_recipe(settings)
+    if args.num_train_steps is not None:
+        settings["num_train_steps"] = args.num_train_steps
+    checkpoint_steps = args.checkpoint_steps
+    if checkpoint_steps is None and args.from_stage1_env:
+        checkpoint_steps = os.environ.get("BIYI_CHECKPOINT_STEPS")
+    if checkpoint_steps is not None:
+        settings["checkpoint_steps"] = list(parse_checkpoint_steps(checkpoint_steps, settings["num_train_steps"]))
     root = args.persistent_root
     if root is None and args.from_stage1_env:
         root = str(Path(os.environ["BIYI_CHECKPOINT_BASE_DIR"]).parent)
     store.require(root, "Set BIYI_PERSISTENT_ROOT or BIYI_RUN_ROOT")
+    dataset_root = args.dataset_root
+    if dataset_root is None and args.from_stage1_env:
+        dataset_root = os.environ.get("BIYI_DATASET_LOCAL_ROOT")
+    if dataset_root is None:
+        dataset_root = Path(root) / "datasets" / args.dataset_revision
+    plan_only = args.action == "plan" or args.dry_run
+    if not plan_only:
+        runtime.gpu_count(settings["num_gpus"], verify=True)
+        checkpoint_root = (os.environ.get("BIYI_CHECKPOINT_BASE_DIR") if args.from_stage1_env else None) or str(
+            Path(root) / "checkpoints"
+        )
+        policy = runtime.storage_policy(checkpoint_root, probe=True)
+    metadata_present = any((Path(dataset_root) / "meta" / name).exists() for name in ("info.json", "episodes.jsonl"))
+    # Preserve old filesystem-free command previews when no snapshot was supplied.
+    # An explicit --dataset-root or an actual run always requires valid metadata.
+    unresolved_preview = plan_only and args.dataset_root is None and not metadata_present
+    if unresolved_preview:
+        if experiment is not None:
+            settings["experiment"] = experiment
+        store.validate_recipe(settings)
+    else:
+        settings = resolve_dataset_settings(settings, dataset_root, args.dataset_revision, experiment=experiment)
     plan = build_plan(
-        root, args.dataset_revision, settings, resume=args.resume, use_environment_paths=args.from_stage1_env
+        root,
+        args.dataset_revision,
+        settings,
+        resume=args.resume,
+        use_environment_paths=args.from_stage1_env,
+        dataset_root=dataset_root,
     )
-    if args.action == "plan" or args.dry_run:
+    plan["dataset_metadata_resolved"] = not unresolved_preview
+    if plan_only:
         print(json.dumps(plan, indent=2))
         return
-    runtime.gpu_count(settings["num_gpus"], verify=True)
-    policy = runtime.storage_policy(plan["environment"]["BIYI_CHECKPOINT_BASE_DIR"], probe=True)
     record, stats_dir = validate_storage(plan, settings)
     environment = {**os.environ, **plan["environment"], "BIYI_STORAGE_DEVICE": policy["device"]}
     runtime.check_memory_smoke(settings["batch_size"], settings["num_gpus"], environment=environment)

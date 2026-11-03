@@ -1,8 +1,10 @@
 # Portable stock PyTorch π0.5 formal training
 
-For the corrected 117-episode / 77,975-frame Stage-1 snapshot, use
-[README_stage1_117ep.md](README_stage1_117ep.md). It pins the corrected dataset
-and batch-8 / 20k recipe while preserving the legacy 100-episode lifecycle.
+For the historical corrected 117-episode / 77,975-frame snapshot, see
+[README_stage1_117ep.md](README_stage1_117ep.md). New formal runs read their
+episode count and frame count from the supplied dataset, rather than requiring
+100/117 episodes or a fixed 77,975 frames. Historical recipe JSON files remain
+unchanged as records of their original experiments.
 
 `biyivla-pi05-openpi` remains the only training code repository. AutoDL, Colab,
 local servers and other GPU hosts use the same `train_pi05_stage1.sh` launcher,
@@ -60,7 +62,7 @@ export BIYI_NUM_TRAIN_STEPS=10000
 export BIYI_SAVE_INTERVAL=1000
 ```
 
-Freeze the immutable **100-episode** dataset and compute train-only stats using
+Freeze the immutable dataset and compute train-only stats using
 `README_checkpoint_storage.md` (`freeze-dataset`, then `compute-stats`). Do not
 reuse the five-episode smoke revision or its norm stats. Frozen dataset checksums
 and the stats fingerprint must pass before training. Authenticate HF and W&B
@@ -221,3 +223,75 @@ The tests include 1/2/4-GPU command plans, invalid batch/count rejection, failed
 storage/smoke gates, corrupted/partial backups, no-overwrite restores, accepted-only
 HF archive tests and an actual tiny CPU model/AdamW stock save→backup→restore/load
 round trip. They do not establish real π0.5 GPU fit or model-quality acceptance.
+
+## Per-dataset frames and explicit checkpoint steps
+
+For new runs, `train_pi05_fft` reads `meta/info.json` and `meta/episodes.jsonl`
+from the supplied snapshot. It checks contiguous episode IDs, positive lengths,
+and that their sum equals `total_frames`. All snapshot episodes are trained.
+The resolved episode count, frame count, revision, and save schedule appear in
+`plan.recipe` and are frozen into the run manifest. Resume requires the same
+identity and schedule. Historical JSON recipes remain unchanged as templates
+and experiment records; their old frame counts do not constrain a new dataset.
+
+First set the common storage/base/stats environment above, freeze the new data,
+and recompute stats for it. The old `0..99` episode selection in the historical
+example must not select only part of a new full-train snapshot:
+
+```bash
+export BIYI_DATASET_LOCAL_ROOT=/mnt/persistent/new-frozen-dataset
+export BIYI_DATASET_REVISION=REPLACE_WITH_FULL_40_CHARACTER_DATASET_COMMIT
+unset BIYI_TRAIN_EPISODES
+bash scripts/biyi/train_pi05_stage1.sh compute-stats
+
+# Read-only CPU plan. The metadata must exist; this does not start training.
+python -m scripts.biyi.train_pi05_fft plan \
+  --persistent-root "$BIYI_RUN_ROOT" \
+  --dataset-root "$BIYI_DATASET_LOCAL_ROOT" \
+  --dataset-revision "$BIYI_DATASET_REVISION" \
+  --exp-name pi05_biyi_150k_fft_v1 \
+  --num-train-steps 1987 --batch-size 128 --num-gpus 1 \
+  --checkpoint_step 500, 1000, 1500, 1987
+```
+
+After completing the existing smoke/preflight requirements, replace `plan`
+with `preflight` or `train` and retain the arguments. For resume add `--resume`.
+Use a new versioned experiment name; names with an explicit `123ep` label must
+match the actual episode count. Snapshot paths must be outside Git.
+
+The shell forwards these formal arguments too:
+
+```bash
+bash scripts/biyi/train_pi05_stage1.sh train --dry-run \
+  --dataset-root "$BIYI_DATASET_LOCAL_ROOT" \
+  --exp-name pi05_biyi_150k_fft_v1 \
+  --num-train-steps 1987 --batch-size 128 --num-gpus 1 \
+  --checkpoint_step 500, 1000, 1500, 1987
+```
+
+- `--checkpoint_step`, `--checkpoint-step`, and `--checkpoint-steps` accept
+  commas, spaces, a quoted CSV, or a mixture. Steps must be positive integers
+  no larger than `num_train_steps`; duplicates are removed and values sorted.
+- An explicit list replaces periodic `save_interval` saves. The exact final
+  step is always saved, even if omitted. Atomic model/optimizer/metadata/stats
+  saves and synchronous durability backups remain intact. There is no pruning.
+- Without a list, the existing `save_interval` behavior is unchanged.
+- Under `--from-stage1-env` (automatic in the shell), the environment equivalent
+  is `BIYI_CHECKPOINT_STEPS='500,1000,1500,1987'`. Explicit CLI options override
+  environment values; `BIYI_NUM_TRAIN_STEPS` and `BIYI_BATCH_SIZE` still work.
+- The direct `scripts/train_pytorch.py CONFIG` entry also accepts
+  `--checkpoint_step 500, 1000, 1500, 1987` or the canonical
+  `--checkpoint-steps 500 1000 1500 1987`. Use the formal launcher for the
+  complete frozen run provenance and automatic 10% warmup/decay configuration.
+- The save list does not set training duration. At 150,000 training frames and
+  global batch 128, 1.2 equivalent epochs are about 1407 steps. For that case use
+  `--num-train-steps 1407 --checkpoint_step 500, 1000, 1407`.
+
+Plans with snapshot metadata (or an explicit `--dataset-root`) resolve its
+counts, but do not read media, load model weights, probe CUDA, authenticate,
+create run directories, or claim full data integrity. Legacy command previews
+without any snapshot metadata are marked `dataset_metadata_resolved: false`;
+they retain template values only for preview. Actual preflight/train always
+require metadata and resolve it before constructing the frozen run manifest.
+Actual formal preflight still verifies the full dataset lock, matching norm
+stats, source commit, base weights, storage, credentials, and GPU smoke.

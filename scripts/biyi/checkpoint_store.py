@@ -17,6 +17,8 @@ import struct
 import subprocess
 import tempfile
 
+from scripts.biyi.checkpoint_schedule import parse_checkpoint_steps
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_REPO = "PPPPPilot/BiyiVLA-pi05-checkpoints"
 DATASET_REPO = "PPPPPilot/BiyiVLA"
@@ -87,7 +89,7 @@ def check_inventory(root, entries):
 
 
 def validate_run(run):
-    require(run["kind"] in FORMAL_KINDS and SHA.fullmatch(run["source_commit"]), "Formal source provenance missing")
+    require(is_formal_kind(run["kind"]) and SHA.fullmatch(run["source_commit"]), "Formal source provenance missing")
     # The same recipe contract applies to locally created and downloaded releases.
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "recipe.json"
@@ -103,6 +105,8 @@ def validate_run(run):
         and run["dataset"]["episodes"] == list(range(count)),
         "Expected frozen recipe episode provenance",
     )
+    if run["recipe"].get("dataset_from_metadata"):
+        require(run["dataset"].get("frames") == run["recipe"]["dataset_frames"], "Recipe/data frame count mismatch")
     require(
         all(SHA256.fullmatch(run[key]) for key in ("norm_stats_sha256", "base_model_sha256", "uv_lock_sha256"))
         and SHA256.fullmatch(run["dataset"]["lock_sha256"]),
@@ -112,6 +116,10 @@ def validate_run(run):
 
 def recipe(path=RECIPE):
     return validate_recipe(read_json(path))
+
+
+def is_formal_kind(kind):
+    return isinstance(kind, str) and re.fullmatch(r"formal_[1-9][0-9]*ep_fft", kind) is not None
 
 
 def validate_recipe(value):
@@ -130,11 +138,16 @@ def validate_recipe(value):
         "Only stock PyTorch pi05 FFT, AHFE off and LoRA off are supported",
     )
     count = value.get("dataset_episodes")
-    require(type(count) is int and count in (100, 117), "Supported frozen episode counts are 100 and 117")
-    require(re.fullmatch(rf"pi05_biyi_{count}ep_fft_v[1-9][0-9]*", value["experiment"]), "Invalid formal name")
-    if count == 117:
-        require(value.get("dataset_frames") == 77975, "117-episode recipe requires 77975 frames")
-        require(SHA.fullmatch(value.get("dataset_revision", "")), "117-episode recipe requires pinned dataset revision")
+    require(type(count) is int and count > 0, "dataset_episodes must be a positive integer")
+    require(re.fullmatch(r"pi05_biyi_[a-zA-Z0-9_]+_v[1-9][0-9]*", value["experiment"]), "Invalid formal name")
+    named_count = re.fullmatch(r"pi05_biyi_([1-9][0-9]*)ep_fft_v[1-9][0-9]*", value["experiment"])
+    require(named_count is None or int(named_count[1]) == count, "Formal name/episode count mismatch")
+    if "dataset_frames" in value:
+        require(type(value["dataset_frames"]) is int and value["dataset_frames"] > 0, "Invalid dataset_frames")
+    if "dataset_revision" in value:
+        require(SHA.fullmatch(value["dataset_revision"]), "Recipe requires a pinned dataset revision")
+    if value.get("dataset_from_metadata"):
+        require("dataset_frames" in value and "dataset_revision" in value, "Resolved dataset identity missing")
     for name in ("num_train_steps", "batch_size", "num_gpus", "save_interval"):
         require(type(value[name]) is int and value[name] > 0, f"Invalid {name}")
     require(
@@ -142,7 +155,25 @@ def validate_recipe(value):
         "Invalid formal steps / global batch / GPU count",
     )
     require(type(value["num_workers"]) is int and value["num_workers"] >= 0, "Invalid workers")
+    if value.get("checkpoint_steps") is not None:
+        value["checkpoint_steps"] = list(parse_checkpoint_steps(value["checkpoint_steps"], value["num_train_steps"]))
     return value
+
+
+def dataset_metadata(path):
+    """Read actual full-train snapshot dimensions, checking both metadata tables."""
+    info = read_json(file_at(path, "meta/info.json"))
+    count, frames = info.get("total_episodes"), info.get("total_frames")
+    require(type(count) is int and count > 0, "Invalid metadata total_episodes")
+    require(type(frames) is int and frames > 0, "Invalid metadata total_frames")
+    episodes = [json.loads(line) for line in file_at(path, "meta/episodes.jsonl").read_text().splitlines()]
+    require(
+        len(episodes) == count and [row.get("episode_index") for row in episodes] == list(range(count)),
+        "Expected contiguous dataset episode IDs",
+    )
+    require(all(type(row.get("length")) is int and row["length"] > 0 for row in episodes), "Invalid episode length")
+    require(sum(row["length"] for row in episodes) == frames, "Episode lengths disagree with total_frames")
+    return {"dataset_episodes": count, "dataset_frames": frames}
 
 
 def persistent_root(value):
@@ -201,7 +232,7 @@ def freeze_dataset(root, revision):
 
 
 def dataset_identity(path, revision, episode_count=100):
-    require(type(episode_count) is int and episode_count in (100, 117), "Unsupported episode count")
+    require(type(episode_count) is int and episode_count > 0, "Invalid episode count")
     lock = read_json(file_at(path, "dataset_lock.json"))
     require(
         SHA.fullmatch(revision) and lock["revision"] == revision and lock["repo_id"] == DATASET_REPO,
@@ -217,12 +248,15 @@ def dataset_identity(path, revision, episode_count=100):
         len(episodes) == episode_count and [row["episode_index"] for row in episodes] == list(range(episode_count)),
         "Expected contiguous frozen episode IDs",
     )
-    return {
+    identity = {
         "repo_id": DATASET_REPO,
         "revision": revision,
         "episodes": list(range(episode_count)),
         "lock_sha256": digest(Path(path) / "dataset_lock.json"),
     }
+    if "total_frames" in info:
+        identity["frames"] = dataset_metadata(path)["dataset_frames"]
+    return identity
 
 
 def check_safetensors(path):
@@ -465,7 +499,7 @@ def upload(path, confirm):
 def download(root, revision, prefix, output):
     require(SHA.fullmatch(revision), "Download requires immutable HF model commit")
     require(
-        re.fullmatch(r"(inference|resume)/pi05_biyi_(100|117)ep_fft_v[1-9][0-9]*/step-[1-9][0-9]*", prefix),
+        re.fullmatch(r"(inference|resume)/pi05_biyi_[a-zA-Z0-9_]+_v[1-9][0-9]*/step-[1-9][0-9]*", prefix),
         "Invalid release prefix",
     )
     from huggingface_hub import snapshot_download
